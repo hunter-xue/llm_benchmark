@@ -1,0 +1,11 @@
+# 编译产物
+embedding_benchmark
+build/
+
+# macOS
+.DS_Store
+
+# Go 工具链缓存
+*.test
+*.out
+vendor/
