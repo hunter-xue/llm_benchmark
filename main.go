@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -75,11 +76,12 @@ type StreamChunk struct {
 }
 
 type CompletionResult struct {
-	TTFT         time.Duration // Time To First Token
-	E2E          time.Duration // 端到端延迟（首字节到最后一字节）
-	InputTokens  int
-	OutputTokens int // 本地计数
-	Err          error
+	TTFT          time.Duration // Time To First Token
+	E2E           time.Duration // 端到端延迟（首字节到最后一字节）
+	InputTokens   int
+	OutputTokens  int // 本地计数
+	SkippedChunks int // SSE 解析失败被跳过的 chunk 数
+	Err           error
 }
 
 type offlineOnlyBpeLoader struct {
@@ -126,6 +128,19 @@ func main() {
 	}
 
 	flag.Parse()
+
+	if *concurrency <= 0 {
+		fmt.Println("错误: 并发数量 (--c) 必须大于 0")
+		return
+	}
+	if *totalRequests <= 0 {
+		fmt.Println("错误: 总请求数 (--n) 必须大于 0")
+		return
+	}
+	if *targetTokens <= 0 {
+		fmt.Println("错误: 输入 Token 数量 (--tokens) 必须大于 0")
+		return
+	}
 
 	normalizedURL, err := normalizeAPIURL(*apiURL)
 	if err != nil {
@@ -252,11 +267,17 @@ func runEmbeddingBench(
 					results <- res
 					continue
 				}
-				io.Copy(io.Discard, resp.Body)
-				resp.Body.Close()
 				if resp.StatusCode != http.StatusOK {
-					res.Err = fmt.Errorf("HTTP %d", resp.StatusCode)
+					errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+					resp.Body.Close()
+					if len(errBody) > 0 {
+						res.Err = fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(errBody)))
+					} else {
+						res.Err = fmt.Errorf("HTTP %d", resp.StatusCode)
+					}
 				} else {
+					io.Copy(io.Discard, resp.Body)
+					resp.Body.Close()
 					res.Duration = time.Since(reqStart)
 				}
 				results <- res
@@ -319,13 +340,14 @@ func runCompletionBench(
 	totalWallTime := time.Since(startTime)
 
 	var (
-		ttfts        []float64
-		e2es         []float64
-		tpots        []float64
-		totalInToks  int
-		totalOutToks int
-		errors       int
-		errorDetails = make(map[string]int)
+		ttfts             []float64
+		e2es              []float64
+		tpots             []float64
+		totalInToks       int
+		totalOutToks      int
+		totalSkippedChunks int
+		errors            int
+		errorDetails      = make(map[string]int)
 	)
 
 	for r := range results {
@@ -337,6 +359,7 @@ func runCompletionBench(
 			e2es = append(e2es, float64(r.E2E.Milliseconds()))
 			totalInToks += r.InputTokens
 			totalOutToks += r.OutputTokens
+			totalSkippedChunks += r.SkippedChunks
 
 			// TPOT = (E2E - TTFT) / output_tokens，若 output_tokens <= 1 则用 E2E
 			if r.OutputTokens > 1 {
@@ -353,7 +376,7 @@ func runCompletionBench(
 	sort.Float64s(tpots)
 
 	printCompletionReport(ttfts, e2es, tpots, totalInToks, totalOutToks,
-		totalWallTime, errors, errorDetails)
+		totalWallTime, errors, errorDetails, totalSkippedChunks)
 }
 
 // doCompletionRequest 执行单次流式 chat completion 请求并返回所有测量指标。
@@ -408,8 +431,12 @@ func doCompletionRequest(
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		io.Copy(io.Discard, resp.Body)
-		res.Err = fmt.Errorf("HTTP %d", resp.StatusCode)
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		if len(errBody) > 0 {
+			res.Err = fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(errBody)))
+		} else {
+			res.Err = fmt.Errorf("HTTP %d", resp.StatusCode)
+		}
 		return res
 	}
 
@@ -419,6 +446,7 @@ func doCompletionRequest(
 		lastTokenTime  time.Time
 		outputBuf      strings.Builder
 		gotFirstToken  bool
+		skippedChunks  int
 	)
 
 	scanner := bufio.NewScanner(resp.Body)
@@ -441,6 +469,7 @@ func doCompletionRequest(
 
 		var chunk StreamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			skippedChunks++
 			continue
 		}
 
@@ -478,8 +507,11 @@ func doCompletionRequest(
 	outputText := outputBuf.String()
 	res.OutputTokens = len(tkm.Encode(outputText, nil, nil))
 	if res.OutputTokens == 0 {
-		res.OutputTokens = 1 // 至少 1 个字符也算 1 token
+		// 极端情况：收到了非空 delta.content 但 tiktoken 编码为 0 token（如纯控制字符），
+		// 保底设为 1 以避免后续 TPOT 除零
+		res.OutputTokens = 1
 	}
+	res.SkippedChunks = skippedChunks
 
 	return res
 }
@@ -599,7 +631,10 @@ func percentile(sorted []float64, p float64) float64 {
 	if len(sorted) == 0 {
 		return 0
 	}
-	idx := int(float64(len(sorted)) * p)
+	idx := int(math.Ceil(float64(len(sorted))*p)) - 1
+	if idx < 0 {
+		idx = 0
+	}
 	if idx >= len(sorted) {
 		idx = len(sorted) - 1
 	}
@@ -647,6 +682,7 @@ func printEmbeddingReport(latencies []float64, totalTokens int, wallTime time.Du
 	fmt.Printf("  总运行耗时:            %.2f s\n", wallTime.Seconds())
 	fmt.Printf("  RPS:                   %.2f req/s\n", float64(successCount)/wallTime.Seconds())
 	fmt.Printf("  TPS (输入):            %.2f tokens/s\n", float64(totalTokens)/wallTime.Seconds())
+	fmt.Printf("  TPM (输入):            %.2f tokens/min\n", float64(totalTokens)/wallTime.Minutes())
 	fmt.Println(strings.Repeat("-", 60))
 	fmt.Println("  端到端延迟 (ms):")
 	fmt.Printf("    平均:  %.2f ms\n", average(latencies))
@@ -663,6 +699,7 @@ func printCompletionReport(
 	totalInToks, totalOutToks int,
 	wallTime time.Duration,
 	errors int, errorDetails map[string]int,
+	skippedChunks int,
 ) {
 	successCount := len(e2es)
 	totalCount := successCount + errors
@@ -696,6 +733,8 @@ func printCompletionReport(
 	fmt.Printf("  RPS:                   %.2f req/s\n", float64(successCount)/wallTime.Seconds())
 	fmt.Printf("  输入 TPS:              %.2f tokens/s\n", inTPS)
 	fmt.Printf("  输出 TPS:              %.2f tokens/s\n", outTPS)
+	fmt.Printf("  输入 TPM:              %.2f tokens/min\n", float64(totalInToks)/wallTime.Minutes())
+	fmt.Printf("  输出 TPM:              %.2f tokens/min\n", float64(totalOutToks)/wallTime.Minutes())
 	fmt.Printf("  平均输出 Token 数:     %.1f tokens/req\n", avgOutPerReq)
 	fmt.Println(strings.Repeat("-", 60))
 	fmt.Println("  TTFT - 首 Token 延迟 (ms):")
@@ -718,4 +757,7 @@ func printCompletionReport(
 	fmt.Printf("    P90:   %.2f ms\n", percentile(e2es, 0.90))
 	fmt.Printf("    P99:   %.2f ms\n", percentile(e2es, 0.99))
 	fmt.Println(strings.Repeat("-", 60))
+	if skippedChunks > 0 {
+		fmt.Printf("  ⚠️  SSE 解析: 共 %d 个 chunk 因 JSON 格式异常被跳过\n", skippedChunks)
+	}
 }

@@ -15,6 +15,22 @@
 go build -o embedding_benchmark .
 ```
 
+### 交叉编译
+
+```bash
+# Linux amd64
+GOOS=linux GOARCH=amd64 go build -o embedding_benchmark_linux_amd64 .
+
+# Linux arm64
+GOOS=linux GOARCH=arm64 go build -o embedding_benchmark_linux_arm64 .
+
+# macOS arm64 (Apple Silicon)
+GOOS=darwin GOARCH=arm64 go build -o embedding_benchmark_darwin_arm64 .
+
+# Windows amd64
+GOOS=windows GOARCH=amd64 go build -o embedding_benchmark_windows_amd64.exe .
+```
+
 ---
 
 ## 参数说明
@@ -73,6 +89,7 @@ go build -o embedding_benchmark .
 |---|---|
 | **RPS** | 每秒成功完成的请求数 `= 成功请求数 / 总墙钟时间` |
 | **TPS（输入）** | 每秒处理的输入 Token 数 `= 成功请求总 Token 数 / 总墙钟时间` |
+| **TPM（输入）** | 每分钟处理的输入 Token 数 `= TPS × 60` |
 | **E2E 延迟** | 单次请求从发出到完整响应体接收完毕的耗时，统计平均 / P50 / P90 / P99 |
 
 ### Chat Completion 模式
@@ -114,6 +131,8 @@ E2E = 收到最后一个 token 的时刻 - 发送请求的时刻
 | **RPS** | `成功请求数 / 总墙钟时间` |
 | **输入 TPS** | `所有成功请求的输入 token 总数 / 总墙钟时间` |
 | **输出 TPS** | `所有成功请求的输出 token 总数 / 总墙钟时间` |
+| **输入 TPM** | `所有成功请求的输入 token 总数 / 总墙钟时间（分钟）` |
+| **输出 TPM** | `所有成功请求的输出 token 总数 / 总墙钟时间（分钟）` |
 | **平均输出 Token 数** | `输出 token 总数 / 成功请求数` |
 
 > **总墙钟时间**为第一个 goroutine 启动到所有请求处理完毕的实际挂钟时间，反映整体并发吞吐能力。
@@ -137,6 +156,7 @@ E2E = 收到最后一个 token 的时刻 - 发送请求的时刻
   总运行耗时:            8.43 s
   RPS:                   23.73 req/s
   TPS (输入):            6074.88 tokens/s
+  TPM (输入):            364492.88 tokens/min
 ------------------------------------------------------------
   端到端延迟 (ms):
     平均:  832.15 ms
@@ -162,6 +182,8 @@ E2E = 收到最后一个 token 的时刻 - 发送请求的时刻
   RPS:                   1.19 req/s
   输入 TPS:              607.62 tokens/s
   输出 TPS:              284.31 tokens/s
+  输入 TPM:              36457.20 tokens/min
+  输出 TPM:              17058.60 tokens/min
   平均输出 Token 数:     238.6 tokens/req
 ------------------------------------------------------------
   TTFT - 首 Token 延迟 (ms):
@@ -192,3 +214,5 @@ E2E = 收到最后一个 token 的时刻 - 发送请求的时刻
 - Completion 测试使用 `"stream": true`，若目标 API 不支持流式输出，请改用 Embedding 模式
 - 所有统计仅包含**成功请求**，失败请求不计入延迟分布
 - 并发数 `--c` 应根据服务端承载能力调整，过高并发可能导致大量超时错误
+- `--c`、`--n`、`--tokens` 均须大于 0，否则工具会报错退出
+- 非 200 响应的错误信息会包含服务端响应体内容（最多 512 字节），便于排查认证、限流等问题
