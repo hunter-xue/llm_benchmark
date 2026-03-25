@@ -1,83 +1,102 @@
 # embedding_benchmark
 
-针对 OpenAI 兼容 API 的压测工具，支持两种模式：
+针对 OpenAI 兼容 API 的交互式压测工具（TUI），支持两种 API 类型：
 
 - **Embedding 模式**：测试 `/v1/embeddings` 端点的吞吐与延迟
 - **Chat Completion 模式**：测试 `/v1/chat/completions` 端点的流式生成性能，包含 TTFT、TPOT、E2E 等指标
 
-工具根据 `--url` 参数中的路径**自动判断测试模式**，无需手动指定。
+支持三种测试模式：
+
+- **Single Provider**：单 Provider 压测
+- **PK Mode**：两个 Provider 同时压测，结果并排对比，优胜指标绿色高亮
+- **Response Compare**（仅 Chat Completion）：向两个 Provider 发送同一条 Prompt，左右分栏展示原始 JSON 响应，用于对比输出质量
+
+---
+
+## 依赖
+
+- Go 1.23+
+- 本地 BPE 词表文件 `cl100k_base.tiktoken`（工具不会联网下载，需提前准备）
 
 ---
 
 ## 编译
 
-```bash
-go build -o embedding_benchmark .
-```
-
-### 交叉编译
+项目提供 Makefile，构建产物统一输出到 `build/` 目录。
 
 ```bash
-# Linux amd64
-GOOS=linux GOARCH=amd64 go build -o embedding_benchmark_linux_amd64 .
-
-# Linux arm64
-GOOS=linux GOARCH=arm64 go build -o embedding_benchmark_linux_arm64 .
-
-# macOS arm64 (Apple Silicon)
-GOOS=darwin GOARCH=arm64 go build -o embedding_benchmark_darwin_arm64 .
-
-# Windows amd64
-GOOS=windows GOARCH=amd64 go build -o embedding_benchmark_windows_amd64.exe .
+make          # 构建全部平台（macOS / Linux / Windows，各含 amd64 + arm64）
+make macos    # 仅构建 macOS
+make linux    # 仅构建 Linux
+make windows  # 仅构建 Windows
+make clean    # 删除 build/ 目录
 ```
+
+每个平台独立子目录，包含可执行文件和所需的 `cl100k_base.tiktoken` 文件，解压即可运行：
+
+```
+build/
+├── embedding_benchmark-darwin-arm64/
+│   ├── embedding_benchmark
+│   └── cl100k_base.tiktoken
+├── embedding_benchmark-linux-amd64/
+│   ├── embedding_benchmark
+│   └── cl100k_base.tiktoken
+└── ...
+```
+
+版本号自动从 git tag 注入。
+
+> **Windows 注意事项**：TUI 界面依赖 VT/ANSI 转义序列。Windows 10 1903+ 及 Windows 11 的 Windows Terminal、PowerShell 7+、WSL 均支持；旧版 cmd.exe 显示可能异常，建议使用 Windows Terminal。
 
 ---
 
-## 参数说明
-
-| 参数 | 默认值 | 说明 |
-|---|---|---|
-| `--url` | `https://api.openai.com/v1/embeddings` | API 地址。路径含 `chat/completions` 时自动切换为 Completion 模式 |
-| `--key` | _(空)_ | API Key，填入后自动添加 `Authorization: Bearer <key>` 请求头 |
-| `--model` | `text-embedding-3-small` | 模型名称 |
-| `--bpe-file` | `./cl100k_base.tiktoken` | 本地 tiktoken BPE 词表文件路径（离线环境必须提供） |
-| `--c` | `10` | 并发 worker 数量 |
-| `--n` | `100` | 总请求数 |
-| `--tokens` | `500` | 每个请求的输入 Token 数量 |
-| `--max-tokens` | `0` | **[Completion 模式]** 最大输出 Token 数，0 表示不限制 |
-| `--system-prompt` | _(空)_ | **[Completion 模式]** 可选的 system 消息内容 |
-
----
-
-## 使用示例
-
-### Embedding 测试
+## 运行
 
 ```bash
-./embedding_benchmark \
-  --url   https://api.openai.com/v1/embeddings \
-  --key   sk-xxxxxxxx \
-  --model text-embedding-3-small \
-  --c     20 \
-  --n     200 \
-  --tokens 256
+# 使用默认 BPE 文件路径（与可执行文件同目录的 cl100k_base.tiktoken）
+./embedding_benchmark
+
+# 指定 BPE 文件路径
+./embedding_benchmark --bpe-file /path/to/cl100k_base.tiktoken
 ```
 
-### Chat Completion 测试
+> 若 BPE 文件不存在，启动时会输出明确的错误提示和使用说明后退出。通过 Makefile 构建的发布包已将该文件包含在同一目录中，无需额外配置。
 
-```bash
-./embedding_benchmark \
-  --url        http://127.0.0.1:8080/v1/chat/completions \
-  --key        sk-xxxxxxxx \
-  --model      qwen2.5-72b-instruct \
-  --c          10 \
-  --n          50 \
-  --tokens     512 \
-  --max-tokens 256 \
-  --system-prompt "You are a helpful assistant."
-```
+启动后进入 TUI 界面，按提示依次选择：
 
-> 工具会根据 URL 路径自动选择模式，无需额外参数。
+1. **API 类型**：Embedding 或 Chat Completion
+2. **测试模式**：Single Provider / PK Mode / Response Compare
+3. **参数配置**：填写 URL、API Key、模型名等
+4. **`ctrl+s`** 启动，实时显示进度（压测模式）或直接进入对比界面（Response Compare）
+5. 压测完成后查看结果；**`r`** 重新配置，**`q` / `ctrl+c`** 退出
+
+### 通用快捷键
+
+| 快捷键 | 说明 |
+|--------|------|
+| `↑` / `↓` | 在列表中导航 |
+| `enter` | 确认选择 |
+| `tab` / `shift+tab` | 在配置项之间切换 |
+| `ctrl+s` | 开始压测 / 发送请求 |
+| `esc` | 返回上一步 / 取消压测 |
+| `ctrl+c` | 退出 |
+
+### 压测结果页快捷键
+
+| 快捷键 | 说明 |
+|--------|------|
+| `r` | 重新配置并再次压测 |
+| `e` | 查看错误日志（有错误时可用） |
+| `q` / `ctrl+c` | 退出 |
+
+### Response Compare 界面快捷键
+
+| 快捷键 | 说明 |
+|--------|------|
+| `tab` | 切换左/右面板焦点 |
+| `↑` / `↓` / `pgup` / `pgdn` | 滚动当前面板 |
+| `esc` | 返回配置页 |
 
 ---
 
@@ -87,132 +106,31 @@ GOOS=windows GOARCH=amd64 go build -o embedding_benchmark_windows_amd64.exe .
 
 | 指标 | 说明 |
 |---|---|
-| **RPS** | 每秒成功完成的请求数 `= 成功请求数 / 总墙钟时间` |
-| **TPS（输入）** | 每秒处理的输入 Token 数 `= 成功请求总 Token 数 / 总墙钟时间` |
-| **TPM（输入）** | 每分钟处理的输入 Token 数 `= TPS × 60` |
-| **E2E 延迟** | 单次请求从发出到完整响应体接收完毕的耗时，统计平均 / P50 / P90 / P99 |
+| **RPS** | 每秒成功完成的请求数 |
+| **Input TPS** | 每秒处理的输入 Token 数 |
+| **Input TPM** | 每分钟处理的输入 Token 数 |
+| **Latency Avg/P50/P90/P99** | E2E 延迟分布（ms） |
 
 ### Chat Completion 模式
 
 所有指标**完全基于客户端本地时间测量**，不依赖 API 响应体中的 `usage` 字段。
 
-#### TTFT（Time To First Token）—— 首 Token 延迟
-
-```
-TTFT = 收到第一个非空 delta.content 的时刻 - 发送请求的时刻
-```
-
-衡量模型从接到请求到开始产出内容的响应速度，主要受 prefill（预填充）阶段耗时影响。
-
-#### TPOT（Time Per Output Token）—— 每 Token 生成时间
-
-```
-TPOT = (收到最后一个 token 的时刻 - 收到第一个 token 的时刻) / (输出 token 数 - 1)
-```
-
-即 decode 阶段生成每个 token 平均耗费的时间，反映模型的 decode 吞吐能力。当输出仅有 1 个 token 时，退化为 E2E 延迟。
-
-#### E2E（End-to-End Latency）—— 端到端延迟
-
-```
-E2E = 收到最后一个 token 的时刻 - 发送请求的时刻
-```
-
-用户视角下的完整等待时间，等于 `TTFT + TPOT × (输出 token 数 - 1)`。
-
-#### 输出 Token 计数
-
-输出文本通过 **tiktoken（cl100k_base）本地编码**计数，不使用 API 返回的 `usage.completion_tokens`，保证在任何不返回 `usage` 的 API 实现上也能正确统计。
-
-#### 吞吐指标
-
-| 指标 | 计算方式 |
+| 指标 | 说明 |
 |---|---|
-| **RPS** | `成功请求数 / 总墙钟时间` |
-| **输入 TPS** | `所有成功请求的输入 token 总数 / 总墙钟时间` |
-| **输出 TPS** | `所有成功请求的输出 token 总数 / 总墙钟时间` |
-| **输入 TPM** | `所有成功请求的输入 token 总数 / 总墙钟时间（分钟）` |
-| **输出 TPM** | `所有成功请求的输出 token 总数 / 总墙钟时间（分钟）` |
-| **平均输出 Token 数** | `输出 token 总数 / 成功请求数` |
+| **TTFT** | Time To First Token，从发送请求到收到第一个输出 token 的延迟 |
+| **TPOT** | Time Per Output Token，decode 阶段每生成一个 token 的平均耗时 |
+| **E2E** | End-to-End Latency，从发送请求到收到最后一个 token 的总延迟 |
+| **Output TPS / TPM** | 输出 token 吞吐量（每秒 / 每分钟） |
+| **Avg Output Tokens** | 每次请求平均输出的 token 数 |
 
-> **总墙钟时间**为第一个 goroutine 启动到所有请求处理完毕的实际挂钟时间，反映整体并发吞吐能力。
-
----
-
-## 输出示例
-
-### Embedding 模式
-
-```
-🚀 测试启动: text-embedding-3-small  [模式: Embedding]
-📊 参数: 并发=20, 总请求=200, 输入Token=256 (实际=256)
-------------------------------------------------------------
-
-🏁 Embedding 性能测试报告:
-------------------------------------------------------------
-  总请求数:              200
-  成功请求数:            200 (100.00%)
-  失败请求数:            0 (0.00%)
-  总运行耗时:            8.43 s
-  RPS:                   23.73 req/s
-  TPS (输入):            6074.88 tokens/s
-  TPM (输入):            364492.88 tokens/min
-------------------------------------------------------------
-  端到端延迟 (ms):
-    平均:  832.15 ms
-    P50:   801.42 ms
-    P90:   1024.67 ms
-    P99:   1312.08 ms
-------------------------------------------------------------
-```
-
-### Chat Completion 模式
-
-```
-🚀 测试启动: qwen2.5-72b-instruct  [模式: Chat Completion (stream)]
-📊 参数: 并发=10, 总请求=50, 输入Token=512 (实际=512), 最大输出Token=256
-------------------------------------------------------------
-
-🏁 Chat Completion (stream) 性能测试报告:
-------------------------------------------------------------
-  总请求数:              50
-  成功请求数:            50 (100.00%)
-  失败请求数:            0 (0.00%)
-  总运行耗时:            42.17 s
-  RPS:                   1.19 req/s
-  输入 TPS:              607.62 tokens/s
-  输出 TPS:              284.31 tokens/s
-  输入 TPM:              36457.20 tokens/min
-  输出 TPM:              17058.60 tokens/min
-  平均输出 Token 数:     238.6 tokens/req
-------------------------------------------------------------
-  TTFT - 首 Token 延迟 (ms):
-    平均:  312.48 ms
-    P50:   298.11 ms
-    P90:   401.23 ms
-    P99:   512.67 ms
-------------------------------------------------------------
-  TPOT - 每 Token 生成时间 (ms/token):
-    平均:  35.21 ms/token
-    P50:   34.88 ms/token
-    P90:   38.12 ms/token
-    P99:   44.03 ms/token
-------------------------------------------------------------
-  E2E 延迟 - 端到端延迟 (ms):
-    平均:  8724.33 ms
-    P50:   8501.12 ms
-    P90:   9812.44 ms
-    P99:   11203.07 ms
-------------------------------------------------------------
-```
+> 输出 token 数通过 **tiktoken（cl100k_base）本地编码**计数，不使用 API 的 `usage.completion_tokens`，在任何不返回 `usage` 的 API 实现上也能正确统计。
 
 ---
 
 ## 注意事项
 
-- BPE 词表文件 `cl100k_base.tiktoken` 需在本地可访问，工具不会联网下载
-- Completion 测试使用 `"stream": true`，若目标 API 不支持流式输出，请改用 Embedding 模式
-- 所有统计仅包含**成功请求**，失败请求不计入延迟分布
-- 并发数 `--c` 应根据服务端承载能力调整，过高并发可能导致大量超时错误
-- `--c`、`--n`、`--tokens` 均须大于 0，否则工具会报错退出
-- 非 200 响应的错误信息会包含服务端响应体内容（最多 512 字节），便于排查认证、限流等问题
+- BPE 词表文件 `cl100k_base.tiktoken` 须在本地可访问，工具不会联网下载；文件缺失时启动报错并退出
+- Completion 压测使用 `"stream": true`，目标 API 须支持 SSE 流式输出
+- Response Compare 使用 `"stream": false`，输出长度使用各 Provider API 默认值
+- 所有压测统计仅包含**成功请求**，失败请求不计入延迟分布
+- 非 200 响应的错误信息会包含服务端响应体（最多 512 字节），便于排查认证、限流问题
