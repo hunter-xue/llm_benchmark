@@ -28,22 +28,20 @@ func newResultsModel(apiMode, testMode string, providerNames []string) resultsMo
 }
 
 func (m *resultsModel) addEmbeddingResult(idx int, r *bench.EmbeddingReport) {
-	if idx == 0 {
-		m.embeddingReports = []*bench.EmbeddingReport{r, nil}
-	} else if idx == 1 && len(m.embeddingReports) > 0 {
-		m.embeddingReports[1] = r
+	for len(m.embeddingReports) <= idx {
+		m.embeddingReports = append(m.embeddingReports, nil)
 	}
+	m.embeddingReports[idx] = r
 	if r != nil && len(r.ErrorDetails) > 0 {
 		m.hasErrors = true
 	}
 }
 
 func (m *resultsModel) addCompletionResult(idx int, r *bench.CompletionReport) {
-	if idx == 0 {
-		m.completionReports = []*bench.CompletionReport{r, nil}
-	} else if idx == 1 && len(m.completionReports) > 0 {
-		m.completionReports[1] = r
+	for len(m.completionReports) <= idx {
+		m.completionReports = append(m.completionReports, nil)
 	}
+	m.completionReports[idx] = r
 	if r != nil && len(r.ErrorDetails) > 0 {
 		m.hasErrors = true
 	}
