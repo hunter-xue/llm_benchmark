@@ -106,9 +106,9 @@ func (m resultsModel) view(width, height int) string {
 	}
 
 	sb.WriteString("\n")
-	hints := "r rerun  •  q / ctrl+c  quit"
+	hints := "r rerun  •  esc back  •  ctrl+c quit"
 	if m.hasErrors {
-		hints = "r rerun  •  e view errors  •  q / ctrl+c  quit"
+		hints = "r rerun  •  e view errors  •  esc back  •  ctrl+c quit"
 	}
 	sb.WriteString(helpStyle.Render(hints))
 	return sb.String()
@@ -298,7 +298,7 @@ func (m resultsModel) renderCompletionSingle(sb *strings.Builder) {
 		return
 	}
 
-	metricRows := [][]string{
+	renderTwoColTable(sb, [][]string{
 		{"Wall Time", fmt.Sprintf("%.2f s", r.WallTime.Seconds())},
 		{"RPS", fmtF(r.RPS, 2)},
 		{"Input TPS", fmtF(r.InputTPS, 1)},
@@ -306,23 +306,35 @@ func (m resultsModel) renderCompletionSingle(sb *strings.Builder) {
 		{"Input TPM", fmtF(r.InputTPM, 0)},
 		{"Output TPM", fmtF(r.OutputTPM, 0)},
 		{"Avg Output Tokens", fmtF(r.AvgOutputTokens, 1)},
+	})
+	sb.WriteString(dimStyle.Render("  " + strings.Repeat("─", 36)))
+	sb.WriteString("\n")
+	renderTwoColTable(sb, [][]string{
 		{"TTFT Avg", fmtMs(r.TTFTAvg)},
 		{"TTFT P50", fmtMs(r.TTFTp50)},
 		{"TTFT P90", fmtMs(r.TTFTp90)},
 		{"TTFT P99", fmtMs(r.TTFTp99)},
+	})
+	sb.WriteString(dimStyle.Render("  " + strings.Repeat("─", 36)))
+	sb.WriteString("\n")
+	renderTwoColTable(sb, [][]string{
 		{"TPOT Avg", fmtMsPerTok(r.TPOTAvg)},
 		{"TPOT P50", fmtMsPerTok(r.TPOTp50)},
 		{"TPOT P90", fmtMsPerTok(r.TPOTp90)},
 		{"TPOT P99", fmtMsPerTok(r.TPOTp99)},
+	})
+	sb.WriteString(dimStyle.Render("  " + strings.Repeat("─", 36)))
+	sb.WriteString("\n")
+	e2eRows := [][]string{
 		{"E2E Avg", fmtMs(r.E2EAvg)},
 		{"E2E P50", fmtMs(r.E2Ep50)},
 		{"E2E P90", fmtMs(r.E2Ep90)},
 		{"E2E P99", fmtMs(r.E2Ep99)},
 	}
 	if r.SkippedChunks > 0 {
-		metricRows = append(metricRows, []string{"Skipped SSE Chunks", fmt.Sprintf("%d (warning)", r.SkippedChunks)})
+		e2eRows = append(e2eRows, []string{"Skipped SSE Chunks", fmt.Sprintf("%d (warning)", r.SkippedChunks)})
 	}
-	renderTwoColTable(sb, metricRows)
+	renderTwoColTable(sb, e2eRows)
 
 	if r.ErrorCount > 0 {
 		sb.WriteString("\n")
@@ -355,28 +367,32 @@ func (m resultsModel) renderCompletionPK(sb *strings.Builder) {
 		valA, valB     float64
 		fmtFn          func(float64) string
 		higherIsBetter bool
+		sep            bool // if true, render a separator line instead of a data row
 	}
 
 	var compRows []row
 	if aValid && bValid {
 		compRows = []row{
-			{"RPS", a.RPS, b.RPS, func(v float64) string { return fmtF(v, 2) }, true},
-			{"Input TPS", a.InputTPS, b.InputTPS, func(v float64) string { return fmtF(v, 1) }, true},
-			{"Output TPS", a.OutputTPS, b.OutputTPS, func(v float64) string { return fmtF(v, 1) }, true},
-			{"Input TPM", a.InputTPM, b.InputTPM, func(v float64) string { return fmtF(v, 0) }, true},
-			{"Output TPM", a.OutputTPM, b.OutputTPM, func(v float64) string { return fmtF(v, 0) }, true},
-			{"TTFT Avg", a.TTFTAvg, b.TTFTAvg, fmtMs, false},
-			{"TTFT P50", a.TTFTp50, b.TTFTp50, fmtMs, false},
-			{"TTFT P90", a.TTFTp90, b.TTFTp90, fmtMs, false},
-			{"TTFT P99", a.TTFTp99, b.TTFTp99, fmtMs, false},
-			{"TPOT Avg", a.TPOTAvg, b.TPOTAvg, fmtMsPerTok, false},
-			{"TPOT P50", a.TPOTp50, b.TPOTp50, fmtMsPerTok, false},
-			{"TPOT P90", a.TPOTp90, b.TPOTp90, fmtMsPerTok, false},
-			{"TPOT P99", a.TPOTp99, b.TPOTp99, fmtMsPerTok, false},
-			{"E2E Avg", a.E2EAvg, b.E2EAvg, fmtMs, false},
-			{"E2E P50", a.E2Ep50, b.E2Ep50, fmtMs, false},
-			{"E2E P90", a.E2Ep90, b.E2Ep90, fmtMs, false},
-			{"E2E P99", a.E2Ep99, b.E2Ep99, fmtMs, false},
+			{"RPS", a.RPS, b.RPS, func(v float64) string { return fmtF(v, 2) }, true, false},
+			{"Input TPS", a.InputTPS, b.InputTPS, func(v float64) string { return fmtF(v, 1) }, true, false},
+			{"Output TPS", a.OutputTPS, b.OutputTPS, func(v float64) string { return fmtF(v, 1) }, true, false},
+			{"Input TPM", a.InputTPM, b.InputTPM, func(v float64) string { return fmtF(v, 0) }, true, false},
+			{"Output TPM", a.OutputTPM, b.OutputTPM, func(v float64) string { return fmtF(v, 0) }, true, false},
+			{"", 0, 0, nil, false, true},
+			{"TTFT Avg", a.TTFTAvg, b.TTFTAvg, fmtMs, false, false},
+			{"TTFT P50", a.TTFTp50, b.TTFTp50, fmtMs, false, false},
+			{"TTFT P90", a.TTFTp90, b.TTFTp90, fmtMs, false, false},
+			{"TTFT P99", a.TTFTp99, b.TTFTp99, fmtMs, false, false},
+			{"", 0, 0, nil, false, true},
+			{"TPOT Avg", a.TPOTAvg, b.TPOTAvg, fmtMsPerTok, false, false},
+			{"TPOT P50", a.TPOTp50, b.TPOTp50, fmtMsPerTok, false, false},
+			{"TPOT P90", a.TPOTp90, b.TPOTp90, fmtMsPerTok, false, false},
+			{"TPOT P99", a.TPOTp99, b.TPOTp99, fmtMsPerTok, false, false},
+			{"", 0, 0, nil, false, true},
+			{"E2E Avg", a.E2EAvg, b.E2EAvg, fmtMs, false, false},
+			{"E2E P50", a.E2Ep50, b.E2Ep50, fmtMs, false, false},
+			{"E2E P90", a.E2Ep90, b.E2Ep90, fmtMs, false, false},
+			{"E2E P99", a.E2Ep99, b.E2Ep99, fmtMs, false, false},
 		}
 	}
 
@@ -392,11 +408,12 @@ func (m resultsModel) renderCompletionPK(sb *strings.Builder) {
 	renderPKRow(sb, "Success / Total", successA, successB, -1)
 
 	for _, r := range compRows {
-		va := fmtF(r.valA, 2)
-		vb := fmtF(r.valB, 2)
-		// Use actual format function
-		va = r.fmtFn(r.valA)
-		vb = r.fmtFn(r.valB)
+		if r.sep {
+			renderPKSeparator(sb)
+			continue
+		}
+		va := r.fmtFn(r.valA)
+		vb := r.fmtFn(r.valB)
 		if !aValid {
 			va = naStyle.Render("N/A")
 		}
@@ -430,6 +447,11 @@ func (m resultsModel) renderCompletionPK(sb *strings.Builder) {
 		sb.WriteString("\n")
 		sb.WriteString(errorStyle.Render(fmt.Sprintf("  %s: all requests failed", nameB)))
 	}
+}
+
+func renderPKSeparator(sb *strings.Builder) {
+	sb.WriteString(dimStyle.Render("  " + strings.Repeat("─", 68)))
+	sb.WriteString("\n")
 }
 
 func renderPKHeader(sb *strings.Builder, nameA, nameB string) {

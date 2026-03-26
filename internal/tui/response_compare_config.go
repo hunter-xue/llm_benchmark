@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -15,10 +16,12 @@ var compareConfigFields = []fieldDef{
 	{label: "Provider A URL", placeholder: "https://api.openai.com/v1/chat/completions"},
 	{label: "Provider A API Key", placeholder: "sk-...", password: true},
 	{label: "Provider A Model", placeholder: "e.g. gpt-4o-mini"},
+	{label: "Custom Params", placeholder: `optional JSON, e.g. {"temperature":0.7,"top_p":0.9}`},
 	{label: "Provider B Name", placeholder: "e.g. Azure"},
 	{label: "Provider B URL", placeholder: "https://..."},
 	{label: "Provider B API Key", placeholder: "sk-...", password: true},
 	{label: "Provider B Model", placeholder: "e.g. gpt-4o"},
+	{label: "Custom Params", placeholder: `optional JSON, e.g. {"temperature":0.7,"top_p":0.9}`},
 	{label: "User Message", placeholder: "Enter the prompt to send to both providers"},
 	{label: "System Prompt", placeholder: "optional, leave blank to skip"},
 }
@@ -67,10 +70,23 @@ func (m compareConfigModel) update(msg tea.Msg) (compareConfigModel, tea.Cmd) {
 }
 
 type compareConfigResult struct {
-	providerA    bench.ProviderConfig
-	providerB    bench.ProviderConfig
-	userMessage  string
-	systemPrompt string
+	providerA     bench.ProviderConfig
+	providerB     bench.ProviderConfig
+	userMessage   string
+	systemPrompt  string
+	customParamsA string // validated JSON object string, may be empty
+	customParamsB string // validated JSON object string, may be empty
+}
+
+func validateCustomParams(raw, label string) (string, error) {
+	if raw == "" {
+		return "", nil
+	}
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(raw), &obj); err != nil {
+		return "", fmt.Errorf("%s Custom Params: must be a valid JSON object (%w)", label, err)
+	}
+	return raw, nil
 }
 
 func (m compareConfigModel) validate() (compareConfigResult, error) {
@@ -79,6 +95,7 @@ func (m compareConfigModel) validate() (compareConfigResult, error) {
 		vals[i] = strings.TrimSpace(inp.Value())
 	}
 
+	// indices: A=0-4, B=5-9, Request=10-11
 	urlA, err := bench.NormalizeURL(vals[1])
 	if err != nil {
 		return compareConfigResult{}, fmt.Errorf("Provider A URL: %w", err)
@@ -86,22 +103,34 @@ func (m compareConfigModel) validate() (compareConfigResult, error) {
 	if vals[3] == "" {
 		return compareConfigResult{}, fmt.Errorf("Provider A Model is required")
 	}
-	urlB, err := bench.NormalizeURL(vals[5])
+	customA, err := validateCustomParams(vals[4], "Provider A")
+	if err != nil {
+		return compareConfigResult{}, err
+	}
+
+	urlB, err := bench.NormalizeURL(vals[6])
 	if err != nil {
 		return compareConfigResult{}, fmt.Errorf("Provider B URL: %w", err)
 	}
-	if vals[7] == "" {
+	if vals[8] == "" {
 		return compareConfigResult{}, fmt.Errorf("Provider B Model is required")
 	}
-	if vals[8] == "" {
+	customB, err := validateCustomParams(vals[9], "Provider B")
+	if err != nil {
+		return compareConfigResult{}, err
+	}
+
+	if vals[10] == "" {
 		return compareConfigResult{}, fmt.Errorf("User Message is required")
 	}
 
 	return compareConfigResult{
-		providerA:    bench.ProviderConfig{Name: vals[0], URL: urlA, APIKey: vals[2], Model: vals[3]},
-		providerB:    bench.ProviderConfig{Name: vals[4], URL: urlB, APIKey: vals[6], Model: vals[7]},
-		userMessage:  vals[8],
-		systemPrompt: vals[9],
+		providerA:     bench.ProviderConfig{Name: vals[0], URL: urlA, APIKey: vals[2], Model: vals[3], CustomParams: customA},
+		providerB:     bench.ProviderConfig{Name: vals[5], URL: urlB, APIKey: vals[7], Model: vals[8], CustomParams: customB},
+		userMessage:   vals[10],
+		systemPrompt:  vals[11],
+		customParamsA: customA,
+		customParamsB: customB,
 	}, nil
 }
 
@@ -129,8 +158,8 @@ func (m compareConfigModel) view(width, height int) string {
 		}
 	}
 
-	renderSection("-- Provider A --", 4)
-	renderSection("-- Provider B --", 4)
+	renderSection("-- Provider A --", 5)
+	renderSection("-- Provider B --", 5)
 	renderSection("-- Request --", 2)
 
 	if m.err != "" {

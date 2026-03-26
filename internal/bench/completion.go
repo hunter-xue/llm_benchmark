@@ -217,6 +217,7 @@ func doCompletionRequest(
 		res.Err = fmt.Errorf("failed to marshal request body: %w", err)
 		return res
 	}
+	body = MergeCustomParams(body, provider.CustomParams)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", provider.URL, bytes.NewBuffer(body))
 	if err != nil {
@@ -316,7 +317,9 @@ func doCompletionRequest(
 
 // DoCompareRequest sends a single non-streaming completion request and returns
 // the raw response body pretty-printed as JSON. Used for response quality comparison.
-func DoCompareRequest(ctx context.Context, provider ProviderConfig, cfg BenchConfig, testText string) (string, error) {
+// customParams is an optional JSON object string whose key-value pairs are merged
+// into the request body, allowing provider-specific or non-standard parameters.
+func DoCompareRequest(ctx context.Context, provider ProviderConfig, cfg BenchConfig, testText string, customParams string) (string, error) {
 	messages := []completionMessage{}
 	if cfg.SystemPrompt != "" {
 		messages = append(messages, completionMessage{Role: "system", Content: cfg.SystemPrompt})
@@ -336,6 +339,8 @@ func DoCompareRequest(ctx context.Context, provider ProviderConfig, cfg BenchCon
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal request: %w", err)
 	}
+
+	body = MergeCustomParams(body, customParams)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", provider.URL, bytes.NewBuffer(body))
 	if err != nil {

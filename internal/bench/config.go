@@ -1,6 +1,7 @@
 package bench
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
@@ -13,10 +14,11 @@ const (
 
 // ProviderConfig holds the per-provider settings used in benchmarks.
 type ProviderConfig struct {
-	Name   string // display name, used in PK mode
-	URL    string // full API endpoint URL
-	APIKey string
-	Model  string
+	Name         string // display name, used in PK mode
+	URL          string // full API endpoint URL
+	APIKey       string
+	Model        string
+	CustomParams string // optional JSON object merged into every request body
 }
 
 // BenchConfig holds shared benchmark parameters.
@@ -27,6 +29,31 @@ type BenchConfig struct {
 	TargetTokens    int
 	MaxOutputTokens int    // completion only, 0 = unlimited
 	SystemPrompt    string // completion only
+}
+
+// MergeCustomParams merges a JSON object string into an already-marshaled request
+// body. Keys in customParams override existing keys. Returns body unchanged on
+// any error so the request still proceeds with the standard payload.
+func MergeCustomParams(body []byte, customParams string) []byte {
+	if customParams == "" {
+		return body
+	}
+	var base map[string]any
+	if err := json.Unmarshal(body, &base); err != nil {
+		return body
+	}
+	var extra map[string]any
+	if err := json.Unmarshal([]byte(customParams), &extra); err != nil {
+		return body
+	}
+	for k, v := range extra {
+		base[k] = v
+	}
+	merged, err := json.Marshal(base)
+	if err != nil {
+		return body
+	}
+	return merged
 }
 
 // DetectMode inspects the URL path to determine embedding vs completion mode.

@@ -111,17 +111,20 @@ func startCompareRequestsDirect(
 	p *tea.Program,
 	providerA, providerB bench.ProviderConfig,
 	userMessage, systemPrompt string,
+	customParamsA, customParamsB string,
 ) tea.Cmd {
 	return func() tea.Msg {
 		cfg := bench.BenchConfig{
 			Mode:         bench.ModeCompletion,
 			SystemPrompt: systemPrompt,
 		}
+		customParams := [2]string{customParamsA, customParamsB}
 		for i, prov := range []bench.ProviderConfig{providerA, providerB} {
 			idx := i
 			pv := prov
+			cp := customParams[i]
 			go func() {
-				body, err := bench.DoCompareRequest(context.Background(), pv, cfg, userMessage)
+				body, err := bench.DoCompareRequest(context.Background(), pv, cfg, userMessage, cp)
 				p.Send(CompareResponseMsg{ProviderIndex: idx, Body: body, Err: err})
 			}()
 		}

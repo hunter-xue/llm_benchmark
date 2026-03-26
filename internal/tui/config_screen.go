@@ -55,16 +55,20 @@ func buildFieldDefs(apiMode, testMode string) []fieldDef {
 	isCompletion := apiMode == "completion"
 	isPK := testMode == "pk"
 
+	customParamsPlaceholder := `optional JSON, e.g. {"temperature":0.7}`
+
 	if isPK {
 		defs := []fieldDef{
 			{label: "Provider A Name", placeholder: "e.g. OpenAI"},
 			{label: "Provider A URL", placeholder: "https://api.openai.com/v1/embeddings"},
 			{label: "Provider A API Key", placeholder: "sk-...", password: true},
 			{label: "Provider A Model", placeholder: "e.g. text-embedding-3-small"},
+			{label: "Custom Params", placeholder: customParamsPlaceholder},
 			{label: "Provider B Name", placeholder: "e.g. Azure"},
 			{label: "Provider B URL", placeholder: "https://..."},
 			{label: "Provider B API Key", placeholder: "sk-...", password: true},
 			{label: "Provider B Model", placeholder: "e.g. text-embedding-ada-002"},
+			{label: "Custom Params", placeholder: customParamsPlaceholder},
 			{label: "Concurrency", placeholder: "e.g. 10"},
 			{label: "Total Requests", placeholder: "e.g. 100"},
 			{label: "Input Tokens", placeholder: "e.g. 500"},
@@ -89,6 +93,7 @@ func buildFieldDefs(apiMode, testMode string) []fieldDef {
 		{label: "API URL", placeholder: urlPlaceholder},
 		{label: "API Key", placeholder: "sk-...", password: true},
 		{label: "Model", placeholder: modelPlaceholder},
+		{label: "Custom Params", placeholder: customParamsPlaceholder},
 		{label: "Concurrency", placeholder: "e.g. 10"},
 		{label: "Total Requests", placeholder: "e.g. 100"},
 		{label: "Input Tokens", placeholder: "e.g. 500"},
@@ -146,7 +151,7 @@ func (m configModel) validate() ([]bench.ProviderConfig, bench.BenchConfig, erro
 	}
 
 	if isPK {
-		// Validate Provider A
+		// indices: A=0-4, B=5-9, shared=10+
 		urlA, err := bench.NormalizeURL(vals[1])
 		if err != nil {
 			return nil, bench.BenchConfig{}, fmt.Errorf("Provider A URL: %w", err)
@@ -154,24 +159,28 @@ func (m configModel) validate() ([]bench.ProviderConfig, bench.BenchConfig, erro
 		if vals[3] == "" {
 			return nil, bench.BenchConfig{}, fmt.Errorf("Provider A Model is required")
 		}
-		// Validate Provider B
-		urlB, err := bench.NormalizeURL(vals[5])
+		if _, err := validateCustomParams(vals[4], "Provider A"); err != nil {
+			return nil, bench.BenchConfig{}, err
+		}
+		urlB, err := bench.NormalizeURL(vals[6])
 		if err != nil {
 			return nil, bench.BenchConfig{}, fmt.Errorf("Provider B URL: %w", err)
 		}
-		if vals[7] == "" {
+		if vals[8] == "" {
 			return nil, bench.BenchConfig{}, fmt.Errorf("Provider B Model is required")
 		}
-		// Shared params
-		c, err := parseInt(vals[8], "Concurrency")
+		if _, err := validateCustomParams(vals[9], "Provider B"); err != nil {
+			return nil, bench.BenchConfig{}, err
+		}
+		c, err := parseInt(vals[10], "Concurrency")
 		if err != nil {
 			return nil, bench.BenchConfig{}, err
 		}
-		n, err := parseInt(vals[9], "Total Requests")
+		n, err := parseInt(vals[11], "Total Requests")
 		if err != nil {
 			return nil, bench.BenchConfig{}, err
 		}
-		tokens, err := parseInt(vals[10], "Input Tokens")
+		tokens, err := parseInt(vals[12], "Input Tokens")
 		if err != nil {
 			return nil, bench.BenchConfig{}, err
 		}
@@ -187,18 +196,18 @@ func (m configModel) validate() ([]bench.ProviderConfig, bench.BenchConfig, erro
 			TargetTokens:  tokens,
 		}
 		if isCompletion {
-			maxTok, _ := strconv.Atoi(vals[11])
+			maxTok, _ := strconv.Atoi(vals[13])
 			cfg.MaxOutputTokens = maxTok
-			cfg.SystemPrompt = vals[12]
+			cfg.SystemPrompt = vals[14]
 		}
 		providers := []bench.ProviderConfig{
-			{Name: vals[0], URL: urlA, APIKey: vals[2], Model: vals[3]},
-			{Name: vals[4], URL: urlB, APIKey: vals[6], Model: vals[7]},
+			{Name: vals[0], URL: urlA, APIKey: vals[2], Model: vals[3], CustomParams: vals[4]},
+			{Name: vals[5], URL: urlB, APIKey: vals[7], Model: vals[8], CustomParams: vals[9]},
 		}
 		return providers, cfg, nil
 	}
 
-	// Single provider
+	// Single provider — indices: 0=URL, 1=Key, 2=Model, 3=CustomParams, 4=Concurrency, ...
 	apiURL, err := bench.NormalizeURL(vals[0])
 	if err != nil {
 		return nil, bench.BenchConfig{}, fmt.Errorf("API URL: %w", err)
@@ -206,15 +215,18 @@ func (m configModel) validate() ([]bench.ProviderConfig, bench.BenchConfig, erro
 	if vals[2] == "" {
 		return nil, bench.BenchConfig{}, fmt.Errorf("Model is required")
 	}
-	c, err := parseInt(vals[3], "Concurrency")
+	if _, err := validateCustomParams(vals[3], "Custom Params"); err != nil {
+		return nil, bench.BenchConfig{}, err
+	}
+	c, err := parseInt(vals[4], "Concurrency")
 	if err != nil {
 		return nil, bench.BenchConfig{}, err
 	}
-	n, err := parseInt(vals[4], "Total Requests")
+	n, err := parseInt(vals[5], "Total Requests")
 	if err != nil {
 		return nil, bench.BenchConfig{}, err
 	}
-	tokens, err := parseInt(vals[5], "Input Tokens")
+	tokens, err := parseInt(vals[6], "Input Tokens")
 	if err != nil {
 		return nil, bench.BenchConfig{}, err
 	}
@@ -230,12 +242,12 @@ func (m configModel) validate() ([]bench.ProviderConfig, bench.BenchConfig, erro
 		TargetTokens:  tokens,
 	}
 	if isCompletion {
-		maxTok, _ := strconv.Atoi(vals[6])
+		maxTok, _ := strconv.Atoi(vals[7])
 		cfg.MaxOutputTokens = maxTok
-		cfg.SystemPrompt = vals[7]
+		cfg.SystemPrompt = vals[8]
 	}
 	providers := []bench.ProviderConfig{
-		{Name: "Provider", URL: apiURL, APIKey: vals[1], Model: vals[2]},
+		{Name: "Provider", URL: apiURL, APIKey: vals[1], Model: vals[2], CustomParams: vals[3]},
 	}
 	return providers, cfg, nil
 }
@@ -276,9 +288,9 @@ func (m configModel) view(width, height int) string {
 	}
 
 	if isPK {
-		renderSection("-- Provider A --", 4)
-		renderSection("-- Provider B --", 4)
-		sharedCount := len(m.fieldDefs) - 8
+		renderSection("-- Provider A --", 5)
+		renderSection("-- Provider B --", 5)
+		sharedCount := len(m.fieldDefs) - 10
 		renderSection("-- Shared Parameters --", sharedCount)
 	} else {
 		renderSection("", len(m.fieldDefs))

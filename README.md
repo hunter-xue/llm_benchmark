@@ -69,7 +69,7 @@ build/
 2. **测试模式**：Single Provider / PK Mode / Response Compare
 3. **参数配置**：填写 URL、API Key、模型名等
 4. **`ctrl+s`** 启动，实时显示进度（压测模式）或直接进入对比界面（Response Compare）
-5. 压测完成后查看结果；**`r`** 重新配置，**`q` / `ctrl+c`** 退出
+5. 压测完成后查看结果；**`r`** 重新配置，**`esc`** 返回上级菜单，**`ctrl+c`** 退出
 
 ### 通用快捷键
 
@@ -88,7 +88,8 @@ build/
 |--------|------|
 | `r` | 重新配置并再次压测 |
 | `e` | 查看错误日志（有错误时可用） |
-| `q` / `ctrl+c` | 退出 |
+| `esc` | 返回上级菜单 |
+| `ctrl+c` | 退出 |
 
 ### Response Compare 界面快捷键
 

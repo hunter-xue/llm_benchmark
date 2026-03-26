@@ -124,6 +124,7 @@ func doEmbeddingRequest(ctx context.Context, client *http.Client, provider Provi
 
 	payload := embeddingRequest{Model: provider.Model, Input: []string{testText}}
 	body, _ := json.Marshal(payload)
+	body = MergeCustomParams(body, provider.CustomParams)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", provider.URL, bytes.NewBuffer(body))
 	if err != nil {

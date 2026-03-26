@@ -255,8 +255,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case ScreenResults:
 		switch msg.String() {
-		case "q":
-			return m, tea.Quit
+		case "esc":
+			m.screen = ScreenTestModeSelect
+			return m, nil
 		case "r":
 			// Rerun: go back to config screen
 			m.screen = ScreenConfig
@@ -292,6 +293,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				startCompareRequestsDirect(prog,
 					res.providerA, res.providerB,
 					res.userMessage, res.systemPrompt,
+					res.customParamsA, res.customParamsB,
 				),
 			)
 		default:
