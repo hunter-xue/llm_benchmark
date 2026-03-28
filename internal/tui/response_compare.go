@@ -18,6 +18,7 @@ type responseCompareModel struct {
 	width, height int
 	loadingA, loadingB bool
 	spinner       spinner.Model
+	plainA, plainB string // uncolored text for export
 }
 
 func newResponseCompare(nameA, nameB string) responseCompareModel {
@@ -60,28 +61,61 @@ func (m *responseCompareModel) setSize(w, h int) {
 	}
 }
 
-func (m *responseCompareModel) setResponse(idx int, body string, err error) {
-	content := body
+func formatViewportContent(headers, body string, err error, vpWidth int) string {
 	if err != nil {
-		content = errorStyle.Render(fmt.Sprintf("  Error: %v", err))
+		return errorStyle.Render(fmt.Sprintf("  Error: %v", err))
 	}
-	if content == "" {
-		content = dimStyle.Render("  (empty response)")
+	if headers == "" && body == "" {
+		return dimStyle.Render("  (empty response)")
 	}
+	sep := dimStyle.Render(strings.Repeat("─", vpWidth))
+	return dimStyle.Render(headers) + "\n" + sep + "\n\n" + body
+}
+
+func formatViewportContentPlain(headers, body string, err error) string {
+	if err != nil {
+		return "Error: " + err.Error()
+	}
+	if headers == "" && body == "" {
+		return "(empty response)"
+	}
+	sep := strings.Repeat("─", 60)
+	return headers + "\n" + sep + "\n\n" + body
+}
+
+func (m *responseCompareModel) setResponse(idx int, headers, body string, err error) {
+	vpWidth := m.vpA.Width
+	if idx == 1 {
+		vpWidth = m.vpB.Width
+	}
+	content := formatViewportContent(headers, body, err, vpWidth)
+	plain := formatViewportContentPlain(headers, body, err)
 	switch idx {
 	case 0:
 		m.loadingA = false
+		m.plainA = plain
 		if m.ready {
 			m.vpA.SetContent(content)
 			m.vpA.GotoTop()
 		}
 	case 1:
 		m.loadingB = false
+		m.plainB = plain
 		if m.ready {
 			m.vpB.SetContent(content)
 			m.vpB.GotoTop()
 		}
 	}
+}
+
+func (m responseCompareModel) plainText() string {
+	var sb strings.Builder
+	sb.WriteString("=== " + m.nameA + " ===\n\n")
+	sb.WriteString(m.plainA)
+	sb.WriteString("\n\n\n=== " + m.nameB + " ===\n\n")
+	sb.WriteString(m.plainB)
+	sb.WriteString("\n")
+	return sb.String()
 }
 
 func (m *responseCompareModel) switchFocus() {
@@ -135,7 +169,7 @@ func (m responseCompareModel) view(w, h int) string {
 	}
 	sb.WriteString("\n")
 	sb.WriteString(helpStyle.Render(
-		fmt.Sprintf("tab switch panel  •  ↑/↓ pgup/pgdn scroll  •  esc back    [active: %s]", focusedName),
+		fmt.Sprintf("tab switch  •  j/k scroll  •  ctrl+d/u half page  •  ctrl+e export  •  esc back    [active: %s]", focusedName),
 	))
 
 	return sb.String()

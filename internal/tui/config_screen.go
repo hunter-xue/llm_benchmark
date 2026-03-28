@@ -52,30 +52,54 @@ func newConfigModel(apiMode, testMode string) configModel {
 }
 
 func buildFieldDefs(apiMode, testMode string) []fieldDef {
-	isCompletion := apiMode == "completion"
+	isCompletion    := apiMode == "completion"
+	isAnthropicMsg  := apiMode == "anthropic_messages"
+	isCompletionLike := isCompletion || isAnthropicMsg
 	isPK := testMode == "pk"
 
 	customParamsPlaceholder := `optional JSON, e.g. {"temperature":0.7}`
 
+	maxTokPlaceholder := "e.g. 256  (0 = unlimited)"
+	if isAnthropicMsg {
+		maxTokPlaceholder = "e.g. 4096  (0 → defaults to 4096)"
+	}
+
 	if isPK {
+		urlPlaceholderA := "https://api.openai.com/v1/embeddings"
+		modelPlaceholderA := "e.g. text-embedding-3-small"
+		urlPlaceholderB := "https://..."
+		modelPlaceholderB := "e.g. text-embedding-ada-002"
+		keyPlaceholder := "sk-..."
+		if isCompletion {
+			urlPlaceholderA = "https://api.openai.com/v1/chat/completions"
+			modelPlaceholderA = "e.g. gpt-4o-mini"
+			urlPlaceholderB = "https://..."
+			modelPlaceholderB = "e.g. gpt-4o-mini"
+		} else if isAnthropicMsg {
+			urlPlaceholderA = "https://api.anthropic.com/v1/messages"
+			modelPlaceholderA = "e.g. claude-sonnet-4-6"
+			urlPlaceholderB = "https://api.anthropic.com/v1/messages"
+			modelPlaceholderB = "e.g. claude-haiku-4-5"
+			keyPlaceholder = "sk-ant-..."
+		}
 		defs := []fieldDef{
-			{label: "Provider A Name", placeholder: "e.g. OpenAI"},
-			{label: "Provider A URL", placeholder: "https://api.openai.com/v1/embeddings"},
-			{label: "Provider A API Key", placeholder: "sk-...", password: true},
-			{label: "Provider A Model", placeholder: "e.g. text-embedding-3-small"},
+			{label: "Provider A Name", placeholder: "e.g. Provider A"},
+			{label: "Provider A URL", placeholder: urlPlaceholderA},
+			{label: "Provider A API Key", placeholder: keyPlaceholder, password: true},
+			{label: "Provider A Model", placeholder: modelPlaceholderA},
 			{label: "Custom Params", placeholder: customParamsPlaceholder},
-			{label: "Provider B Name", placeholder: "e.g. Azure"},
-			{label: "Provider B URL", placeholder: "https://..."},
-			{label: "Provider B API Key", placeholder: "sk-...", password: true},
-			{label: "Provider B Model", placeholder: "e.g. text-embedding-ada-002"},
+			{label: "Provider B Name", placeholder: "e.g. Provider B"},
+			{label: "Provider B URL", placeholder: urlPlaceholderB},
+			{label: "Provider B API Key", placeholder: keyPlaceholder, password: true},
+			{label: "Provider B Model", placeholder: modelPlaceholderB},
 			{label: "Custom Params", placeholder: customParamsPlaceholder},
 			{label: "Concurrency", placeholder: "e.g. 10"},
 			{label: "Total Requests", placeholder: "e.g. 100"},
 			{label: "Input Tokens", placeholder: "e.g. 500"},
 		}
-		if isCompletion {
+		if isCompletionLike {
 			defs = append(defs,
-				fieldDef{label: "Max Output Tokens", placeholder: "e.g. 256  (0 = unlimited)"},
+				fieldDef{label: "Max Output Tokens", placeholder: maxTokPlaceholder},
 				fieldDef{label: "System Prompt", placeholder: "optional, leave blank to skip"},
 			)
 		}
@@ -85,22 +109,27 @@ func buildFieldDefs(apiMode, testMode string) []fieldDef {
 	// Single provider
 	urlPlaceholder := "https://api.openai.com/v1/embeddings"
 	modelPlaceholder := "e.g. text-embedding-3-small"
+	keyPlaceholder := "sk-..."
 	if isCompletion {
 		urlPlaceholder = "https://api.openai.com/v1/chat/completions"
 		modelPlaceholder = "e.g. gpt-4o-mini"
+	} else if isAnthropicMsg {
+		urlPlaceholder = "https://api.anthropic.com/v1/messages"
+		modelPlaceholder = "e.g. claude-sonnet-4-6"
+		keyPlaceholder = "sk-ant-..."
 	}
 	defs := []fieldDef{
 		{label: "API URL", placeholder: urlPlaceholder},
-		{label: "API Key", placeholder: "sk-...", password: true},
+		{label: "API Key", placeholder: keyPlaceholder, password: true},
 		{label: "Model", placeholder: modelPlaceholder},
 		{label: "Custom Params", placeholder: customParamsPlaceholder},
 		{label: "Concurrency", placeholder: "e.g. 10"},
 		{label: "Total Requests", placeholder: "e.g. 100"},
 		{label: "Input Tokens", placeholder: "e.g. 500"},
 	}
-	if isCompletion {
+	if isCompletionLike {
 		defs = append(defs,
-			fieldDef{label: "Max Output Tokens", placeholder: "e.g. 256  (0 = unlimited)"},
+			fieldDef{label: "Max Output Tokens", placeholder: maxTokPlaceholder},
 			fieldDef{label: "System Prompt", placeholder: "optional, leave blank to skip"},
 		)
 	}
@@ -139,8 +168,10 @@ func (m configModel) validate() ([]bench.ProviderConfig, bench.BenchConfig, erro
 		vals[i] = strings.TrimSpace(inp.Value())
 	}
 
-	isPK := m.testMode == "pk"
-	isCompletion := m.apiMode == "completion"
+	isPK            := m.testMode == "pk"
+	isCompletion    := m.apiMode == "completion"
+	isAnthropicMsg  := m.apiMode == "anthropic_messages"
+	isCompletionLike := isCompletion || isAnthropicMsg
 
 	parseInt := func(s, name string) (int, error) {
 		v, err := strconv.Atoi(s)
@@ -186,16 +217,15 @@ func (m configModel) validate() ([]bench.ProviderConfig, bench.BenchConfig, erro
 		}
 
 		mode := bench.ModeEmbedding
-		if isCompletion {
-			mode = bench.ModeCompletion
-		}
+		if isCompletion   { mode = bench.ModeCompletion }
+		if isAnthropicMsg { mode = bench.ModeAnthropicMessages }
 		cfg := bench.BenchConfig{
 			Mode:          mode,
 			Concurrency:   c,
 			TotalRequests: n,
 			TargetTokens:  tokens,
 		}
-		if isCompletion {
+		if isCompletionLike {
 			maxTok, _ := strconv.Atoi(vals[13])
 			cfg.MaxOutputTokens = maxTok
 			cfg.SystemPrompt = vals[14]
@@ -232,16 +262,15 @@ func (m configModel) validate() ([]bench.ProviderConfig, bench.BenchConfig, erro
 	}
 
 	mode := bench.ModeEmbedding
-	if isCompletion {
-		mode = bench.ModeCompletion
-	}
+	if isCompletion   { mode = bench.ModeCompletion }
+	if isAnthropicMsg { mode = bench.ModeAnthropicMessages }
 	cfg := bench.BenchConfig{
 		Mode:          mode,
 		Concurrency:   c,
 		TotalRequests: n,
 		TargetTokens:  tokens,
 	}
-	if isCompletion {
+	if isCompletionLike {
 		maxTok, _ := strconv.Atoi(vals[7])
 		cfg.MaxOutputTokens = maxTok
 		cfg.SystemPrompt = vals[8]
@@ -256,8 +285,11 @@ func (m configModel) view(width, height int) string {
 	var sb strings.Builder
 
 	apiLabel := "Embedding"
-	if m.apiMode == "completion" {
+	switch m.apiMode {
+	case "completion":
 		apiLabel = "Chat Completion"
+	case "anthropic_messages":
+		apiLabel = "Anthropic Messages"
 	}
 	testLabel := "Single Provider"
 	if m.testMode == "pk" {

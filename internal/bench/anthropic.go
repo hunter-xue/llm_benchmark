@@ -16,38 +16,36 @@ import (
 	tiktoken "github.com/pkoukk/tiktoken-go"
 )
 
-type completionMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+const anthropicVersion = "2023-06-01"
+const anthropicDefaultMaxTokens = 4096
+
+type anthropicRequest struct {
+	Model     string               `json:"model"`
+	MaxTokens int                  `json:"max_tokens"`
+	System    string               `json:"system,omitempty"`
+	Messages  []completionMessage  `json:"messages"`
+	Stream    bool                 `json:"stream"`
 }
 
-type completionRequest struct {
-	Model     string              `json:"model"`
-	Messages  []completionMessage `json:"messages"`
-	Stream    bool                `json:"stream"`
-	MaxTokens int                 `json:"max_tokens,omitempty"`
+type anthropicChunk struct {
+	Type  string `json:"type"`
+	Delta struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"delta"`
 }
 
-type streamChunk struct {
-	Choices []struct {
-		Delta struct {
-			Content string `json:"content"`
-		} `json:"delta"`
-		FinishReason *string `json:"finish_reason"`
-	} `json:"choices"`
+func setAnthropicHeaders(req *http.Request, apiKey string) {
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", anthropicVersion)
+	if apiKey != "" {
+		req.Header.Set("x-api-key", apiKey)
+	}
 }
 
-type completionResult struct {
-	TTFT          time.Duration
-	E2E           time.Duration
-	InputTokens   int
-	OutputTokens  int
-	SkippedChunks int
-	Err           error
-}
-
-// RunCompletionBench runs a concurrent streaming completion benchmark and returns the report.
-func RunCompletionBench(
+// RunAnthropicMessagesBench runs a concurrent streaming Anthropic Messages benchmark.
+// It reuses CompletionReport since the metrics are identical to completion mode.
+func RunAnthropicMessagesBench(
 	ctx context.Context,
 	provider ProviderConfig,
 	cfg BenchConfig,
@@ -94,7 +92,7 @@ func RunCompletionBench(
 				default:
 				}
 
-				res := doCompletionRequest(ctx, client, provider, cfg, testText, actualInputTokens, tkm)
+				res := doAnthropicRequest(ctx, client, provider, cfg, testText, actualInputTokens, tkm)
 				results <- res
 				mu.Lock()
 				if res.Err != nil {
@@ -186,7 +184,7 @@ func RunCompletionBench(
 	return report
 }
 
-func doCompletionRequest(
+func doAnthropicRequest(
 	ctx context.Context,
 	client *http.Client,
 	provider ProviderConfig,
@@ -197,19 +195,17 @@ func doCompletionRequest(
 ) completionResult {
 	res := completionResult{InputTokens: actualInputTokens}
 
-	messages := []completionMessage{}
-	if cfg.SystemPrompt != "" {
-		messages = append(messages, completionMessage{Role: "system", Content: cfg.SystemPrompt})
+	maxTokens := cfg.MaxOutputTokens
+	if maxTokens == 0 {
+		maxTokens = anthropicDefaultMaxTokens
 	}
-	messages = append(messages, completionMessage{Role: "user", Content: testText})
 
-	payload := completionRequest{
-		Model:    provider.Model,
-		Messages: messages,
-		Stream:   true,
-	}
-	if cfg.MaxOutputTokens > 0 {
-		payload.MaxTokens = cfg.MaxOutputTokens
+	payload := anthropicRequest{
+		Model:     provider.Model,
+		MaxTokens: maxTokens,
+		System:    cfg.SystemPrompt,
+		Messages:  []completionMessage{{Role: "user", Content: testText}},
+		Stream:    true,
 	}
 
 	body, err := json.Marshal(payload)
@@ -224,11 +220,8 @@ func doCompletionRequest(
 		res.Err = fmt.Errorf("failed to create request: %w", err)
 		return res
 	}
-	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
-	if provider.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+provider.APIKey)
-	}
+	setAnthropicHeaders(req, provider.APIKey)
 
 	sendTime := time.Now()
 	resp, err := client.Do(req)
@@ -254,6 +247,7 @@ func doCompletionRequest(
 		outputBuf      strings.Builder
 		gotFirstToken  bool
 		skippedChunks  int
+		eventType      string
 	)
 
 	scanner := bufio.NewScanner(resp.Body)
@@ -261,35 +255,33 @@ func doCompletionRequest(
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		if !strings.HasPrefix(line, "data:") {
+		if strings.HasPrefix(line, "event:") {
+			eventType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			if eventType == "message_stop" {
+				break
+			}
+			continue
+		}
+		if eventType != "content_block_delta" || !strings.HasPrefix(line, "data:") {
 			continue
 		}
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if data == "[DONE]" {
-			break
-		}
 		if data == "" {
 			continue
 		}
-
-		var chunk streamChunk
+		var chunk anthropicChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			skippedChunks++
 			continue
 		}
-
-		for _, choice := range chunk.Choices {
-			content := choice.Delta.Content
-			if content == "" {
-				continue
-			}
+		if chunk.Delta.Type == "text_delta" && chunk.Delta.Text != "" {
 			now := time.Now()
 			if !gotFirstToken {
 				firstTokenTime = now
 				gotFirstToken = true
 			}
 			lastTokenTime = now
-			outputBuf.WriteString(content)
+			outputBuf.WriteString(chunk.Delta.Text)
 		}
 	}
 
@@ -315,41 +307,33 @@ func doCompletionRequest(
 	return res
 }
 
-// DoCompareRequest sends a single non-streaming completion request and returns
-// the formatted response headers and pretty-printed JSON body.
-// customParams is an optional JSON object string whose key-value pairs are merged
-// into the request body, allowing provider-specific or non-standard parameters.
-func DoCompareRequest(ctx context.Context, provider ProviderConfig, cfg BenchConfig, testText string, customParams string) (headers string, body string, err error) {
-	messages := []completionMessage{}
-	if cfg.SystemPrompt != "" {
-		messages = append(messages, completionMessage{Role: "system", Content: cfg.SystemPrompt})
+// DoAnthropicCompareRequest sends a single non-streaming Anthropic Messages request
+// and returns the formatted response headers and pretty-printed JSON body.
+func DoAnthropicCompareRequest(ctx context.Context, provider ProviderConfig, cfg BenchConfig, userMessage, customParams string) (headers string, body string, err error) {
+	maxTokens := cfg.MaxOutputTokens
+	if maxTokens == 0 {
+		maxTokens = anthropicDefaultMaxTokens
 	}
-	messages = append(messages, completionMessage{Role: "user", Content: testText})
 
-	payload := completionRequest{
-		Model:    provider.Model,
-		Messages: messages,
-		Stream:   false,
-	}
-	if cfg.MaxOutputTokens > 0 {
-		payload.MaxTokens = cfg.MaxOutputTokens
+	payload := anthropicRequest{
+		Model:     provider.Model,
+		MaxTokens: maxTokens,
+		System:    cfg.SystemPrompt,
+		Messages:  []completionMessage{{Role: "user", Content: userMessage}},
+		Stream:    false,
 	}
 
 	reqBody, marshalErr := json.Marshal(payload)
 	if marshalErr != nil {
 		return "", "", fmt.Errorf("failed to marshal request: %w", marshalErr)
 	}
-
 	reqBody = MergeCustomParams(reqBody, customParams)
 
 	req, reqErr := http.NewRequestWithContext(ctx, "POST", provider.URL, bytes.NewBuffer(reqBody))
 	if reqErr != nil {
 		return "", "", fmt.Errorf("failed to create request: %w", reqErr)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	if provider.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+provider.APIKey)
-	}
+	setAnthropicHeaders(req, provider.APIKey)
 
 	client := &http.Client{Timeout: 120 * time.Second}
 	resp, doErr := client.Do(req)
@@ -373,7 +357,6 @@ func DoCompareRequest(ctx context.Context, provider ProviderConfig, cfg BenchCon
 
 	headers = FormatResponseHeaders(resp.Proto, resp.Status, resp.Header)
 
-	// Pretty-print JSON for readability
 	var parsed any
 	if jsonErr := json.Unmarshal(rawBody, &parsed); jsonErr != nil {
 		return headers, string(rawBody), nil

@@ -19,6 +19,14 @@ type BenchDoneMsg struct {
 // CompareResponseMsg carries one provider's raw JSON response for the comparison screen.
 type CompareResponseMsg struct {
 	ProviderIndex int
+	Headers       string // formatted HTTP response headers
 	Body          string // pretty-printed JSON on success
 	Err           error
+}
+
+// SingleResponseMsg carries the raw JSON response for the single response view screen.
+type SingleResponseMsg struct {
+	Headers string // formatted HTTP response headers
+	Body    string // pretty-printed JSON on success
+	Err     error
 }

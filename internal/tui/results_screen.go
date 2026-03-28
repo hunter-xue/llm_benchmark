@@ -104,9 +104,9 @@ func (m resultsModel) view(width, height int) string {
 	}
 
 	sb.WriteString("\n")
-	hints := "r rerun  •  esc back  •  ctrl+c quit"
+	hints := "r rerun  •  ctrl+e export  •  esc back  •  ctrl+c quit"
 	if m.hasErrors {
-		hints = "r rerun  •  e view errors  •  esc back  •  ctrl+c quit"
+		hints = "r rerun  •  e errors  •  ctrl+e export  •  esc back  •  ctrl+c quit"
 	}
 	sb.WriteString(helpStyle.Render(hints))
 	return sb.String()

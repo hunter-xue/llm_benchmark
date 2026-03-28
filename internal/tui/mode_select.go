@@ -14,7 +14,7 @@ type modeSelectModel struct {
 
 func newModeSelect() modeSelectModel {
 	return modeSelectModel{
-		items: []string{"Embedding", "Chat Completion"},
+		items: []string{"Embedding", "Chat Completion", "Anthropic Messages"},
 	}
 }
 
@@ -41,6 +41,8 @@ func (m modeSelectModel) selected() string {
 		return "embedding"
 	case 1:
 		return "completion"
+	case 2:
+		return "anthropic_messages"
 	}
 	return "embedding"
 }

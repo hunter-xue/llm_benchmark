@@ -3,13 +3,16 @@ package bench
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 )
 
 const (
-	ModeEmbedding  = "embedding"
-	ModeCompletion = "completion"
+	ModeEmbedding         = "embedding"
+	ModeCompletion        = "completion"
+	ModeAnthropicMessages = "anthropic_messages"
 )
 
 // ProviderConfig holds the per-provider settings used in benchmarks.
@@ -67,6 +70,24 @@ func DetectMode(apiURL string) string {
 		return ModeCompletion
 	}
 	return ModeEmbedding
+}
+
+// FormatResponseHeaders formats an HTTP response status line and headers for display.
+// Headers are sorted alphabetically for stable output.
+func FormatResponseHeaders(proto, status string, h http.Header) string {
+	var sb strings.Builder
+	sb.WriteString(proto + " " + status + "\n")
+	keys := make([]string, 0, len(h))
+	for k := range h {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		for _, v := range h[k] {
+			sb.WriteString(k + ": " + v + "\n")
+		}
+	}
+	return sb.String()
 }
 
 // NormalizeURL validates and normalizes a raw API URL string.

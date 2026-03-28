@@ -22,6 +22,8 @@ const (
 	ScreenResults
 	ScreenResponseCompareConfig
 	ScreenResponseCompare
+	ScreenSingleResponseConfig
+	ScreenSingleResponse
 )
 
 // prog holds the global program reference so goroutines can call p.Send().
@@ -65,6 +67,13 @@ type Model struct {
 	responseCompare responseCompareModel
 	compareDone     int
 
+	// Single response view flow
+	singleResponseConfig singleResponseConfigModel
+	singleResponse       singleResponseModel
+
+	// Export overlay
+	export exportModel
+
 	// Track how many provider benchmarks have finished (for PK mode)
 	doneProviders int
 }
@@ -75,6 +84,7 @@ func NewModel(tkm *tiktoken.Tiktoken) Model {
 		tkm:        tkm,
 		screen:     ScreenModeSelect,
 		modeSelect: newModeSelect(),
+		export:     newExportModel(),
 	}
 }
 
@@ -94,6 +104,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.config.setWidth(m.width)
 		m.compareConfig.setWidth(m.width)
 		m.responseCompare.setSize(m.width, m.height)
+		m.singleResponseConfig.setWidth(m.width)
+		m.singleResponse.setSize(m.width, m.height)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -103,6 +115,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cancelFunc()
 			}
 			return m, tea.Quit
+		}
+
+		// Export overlay captures all keys when active
+		if m.export.active {
+			var cmd tea.Cmd
+			m.export, cmd = m.export.update(msg)
+			return m, cmd
 		}
 
 		// Error overlay captures all keys
@@ -145,8 +164,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case CompareResponseMsg:
-		m.responseCompare.setResponse(msg.ProviderIndex, msg.Body, msg.Err)
+		m.responseCompare.setResponse(msg.ProviderIndex, msg.Headers, msg.Body, msg.Err)
 		m.compareDone++
+		return m, nil
+
+	case SingleResponseMsg:
+		m.singleResponse.setResponse(msg.Headers, msg.Body, msg.Err)
 		return m, nil
 
 	case spinner.TickMsg:
@@ -158,6 +181,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.screen == ScreenResponseCompare {
 			var cmd tea.Cmd
 			m.responseCompare, cmd = m.responseCompare.update(msg)
+			return m, cmd
+		}
+		if m.screen == ScreenSingleResponse {
+			var cmd tea.Cmd
+			m.singleResponse, cmd = m.singleResponse.update(msg)
 			return m, cmd
 		}
 		return m, nil
@@ -196,15 +224,22 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "enter":
 			m.testMode = m.testModeSelect.selected()
-			if m.testMode == "response_compare" {
-				m.compareConfig = newCompareConfig()
+			switch m.testMode {
+			case "response_compare":
+				m.compareConfig = newCompareConfig(m.apiMode)
 				m.compareConfig.setWidth(m.width)
 				m.screen = ScreenResponseCompareConfig
 				return m, m.compareConfig.inputs[0].Focus()
+			case "single_response_view":
+				m.singleResponseConfig = newSingleResponseConfig(m.apiMode)
+				m.singleResponseConfig.setWidth(m.width)
+				m.screen = ScreenSingleResponseConfig
+				return m, m.singleResponseConfig.inputs[0].Focus()
+			default:
+				m.config = newConfigModel(m.apiMode, m.testMode)
+				m.screen = ScreenConfig
+				return m, m.config.inputs[0].Focus()
 			}
-			m.config = newConfigModel(m.apiMode, m.testMode)
-			m.screen = ScreenConfig
-			return m, m.config.inputs[0].Focus()
 		default:
 			var cmd tea.Cmd
 			m.testModeSelect, cmd = m.testModeSelect.update(msg)
@@ -270,6 +305,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.errorViewport.setSize(m.width-4, m.height-4)
 			}
 			return m, nil
+		case "ctrl+e":
+			plain := stripANSI(m.results.view(m.width, m.height))
+			return m, m.export.activate(plain)
 		}
 
 	case ScreenResponseCompareConfig:
@@ -291,6 +329,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(
 				m.responseCompare.spinner.Tick,
 				startCompareRequestsDirect(prog,
+					m.apiMode,
 					res.providerA, res.providerB,
 					res.userMessage, res.systemPrompt,
 					res.customParamsA, res.customParamsB,
@@ -310,9 +349,50 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "tab":
 			m.responseCompare.switchFocus()
 			return m, nil
+		case "ctrl+e":
+			return m, m.export.activate(m.responseCompare.plainText())
 		default:
 			var cmd tea.Cmd
 			m.responseCompare, cmd = m.responseCompare.update(msg)
+			return m, cmd
+		}
+
+	case ScreenSingleResponseConfig:
+		switch msg.String() {
+		case "esc":
+			m.screen = ScreenTestModeSelect
+			return m, nil
+		case "ctrl+s":
+			res, err := m.singleResponseConfig.validate()
+			if err != nil {
+				m.singleResponseConfig.err = err.Error()
+				return m, nil
+			}
+			m.singleResponseConfig.err = ""
+			m.singleResponse = newSingleResponse(res.provider.Model)
+			m.singleResponse.setSize(m.width, m.height)
+			m.screen = ScreenSingleResponse
+			return m, tea.Batch(
+				m.singleResponse.spinner.Tick,
+				startSingleResponseRequest(prog, m.apiMode, res.provider,
+					res.userMessage, res.systemPrompt, res.provider.CustomParams),
+			)
+		default:
+			var cmd tea.Cmd
+			m.singleResponseConfig, cmd = m.singleResponseConfig.update(msg)
+			return m, cmd
+		}
+
+	case ScreenSingleResponse:
+		switch msg.String() {
+		case "esc":
+			m.screen = ScreenSingleResponseConfig
+			return m, nil
+		case "ctrl+e":
+			return m, m.export.activate(m.singleResponse.plain)
+		default:
+			var cmd tea.Cmd
+			m.singleResponse, cmd = m.singleResponse.update(msg)
 			return m, cmd
 		}
 	}
@@ -360,6 +440,10 @@ func (m Model) View() string {
 		content = m.compareConfig.view(m.width, m.height)
 	case ScreenResponseCompare:
 		content = m.responseCompare.view(m.width, m.height)
+	case ScreenSingleResponseConfig:
+		content = m.singleResponseConfig.view(m.width, m.height)
+	case ScreenSingleResponse:
+		content = m.singleResponse.view(m.width, m.height)
 	default:
 		content = "Loading..."
 	}
@@ -368,6 +452,10 @@ func (m Model) View() string {
 		// Overlay: show error viewport centered over content
 		overlay := m.errorViewport.view()
 		return overlayOnTop(content, overlay, m.width, m.height)
+	}
+	exportScreen := m.screen == ScreenResults || m.screen == ScreenResponseCompare || m.screen == ScreenSingleResponse
+	if exportScreen && (m.export.active || m.export.status != "") {
+		return content + "\n" + m.export.view()
 	}
 	return content
 }

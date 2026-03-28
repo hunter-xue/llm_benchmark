@@ -11,31 +11,52 @@ import (
 	"embedding_benchmark/internal/bench"
 )
 
-var compareConfigFields = []fieldDef{
-	{label: "Provider A Name", placeholder: "e.g. OpenAI"},
-	{label: "Provider A URL", placeholder: "https://api.openai.com/v1/chat/completions"},
-	{label: "Provider A API Key", placeholder: "sk-...", password: true},
-	{label: "Provider A Model", placeholder: "e.g. gpt-4o-mini"},
-	{label: "Custom Params", placeholder: `optional JSON, e.g. {"temperature":0.7,"top_p":0.9}`},
-	{label: "Provider B Name", placeholder: "e.g. Azure"},
-	{label: "Provider B URL", placeholder: "https://..."},
-	{label: "Provider B API Key", placeholder: "sk-...", password: true},
-	{label: "Provider B Model", placeholder: "e.g. gpt-4o"},
-	{label: "Custom Params", placeholder: `optional JSON, e.g. {"temperature":0.7,"top_p":0.9}`},
-	{label: "User Message", placeholder: "Enter the prompt to send to both providers"},
-	{label: "System Prompt", placeholder: "optional, leave blank to skip"},
+func buildCompareConfigFields(apiMode string) []fieldDef {
+	customParamsPlaceholder := `optional JSON, e.g. {"temperature":0.7,"top_p":0.9}`
+	if apiMode == "anthropic_messages" {
+		return []fieldDef{
+			{label: "Provider A Name", placeholder: "e.g. Claude Haiku"},
+			{label: "Provider A URL", placeholder: "https://api.anthropic.com/v1/messages"},
+			{label: "Provider A API Key", placeholder: "sk-ant-...", password: true},
+			{label: "Provider A Model", placeholder: "e.g. claude-haiku-4-5"},
+			{label: "Custom Params", placeholder: customParamsPlaceholder},
+			{label: "Provider B Name", placeholder: "e.g. Claude Sonnet"},
+			{label: "Provider B URL", placeholder: "https://api.anthropic.com/v1/messages"},
+			{label: "Provider B API Key", placeholder: "sk-ant-...", password: true},
+			{label: "Provider B Model", placeholder: "e.g. claude-sonnet-4-6"},
+			{label: "Custom Params", placeholder: customParamsPlaceholder},
+			{label: "User Message", placeholder: "Enter the prompt to send to both providers"},
+			{label: "System Prompt", placeholder: "optional, leave blank to skip"},
+		}
+	}
+	return []fieldDef{
+		{label: "Provider A Name", placeholder: "e.g. OpenAI"},
+		{label: "Provider A URL", placeholder: "https://api.openai.com/v1/chat/completions"},
+		{label: "Provider A API Key", placeholder: "sk-...", password: true},
+		{label: "Provider A Model", placeholder: "e.g. gpt-4o-mini"},
+		{label: "Custom Params", placeholder: customParamsPlaceholder},
+		{label: "Provider B Name", placeholder: "e.g. Azure"},
+		{label: "Provider B URL", placeholder: "https://..."},
+		{label: "Provider B API Key", placeholder: "sk-...", password: true},
+		{label: "Provider B Model", placeholder: "e.g. gpt-4o"},
+		{label: "Custom Params", placeholder: customParamsPlaceholder},
+		{label: "User Message", placeholder: "Enter the prompt to send to both providers"},
+		{label: "System Prompt", placeholder: "optional, leave blank to skip"},
+	}
 }
 
 type compareConfigModel struct {
 	inputs     []textinput.Model
+	fields     []fieldDef
 	focusIndex int
 	err        string
 	width      int
 }
 
-func newCompareConfig() compareConfigModel {
-	inputs := make([]textinput.Model, len(compareConfigFields))
-	for i, fd := range compareConfigFields {
+func newCompareConfig(apiMode string) compareConfigModel {
+	fields := buildCompareConfigFields(apiMode)
+	inputs := make([]textinput.Model, len(fields))
+	for i, fd := range fields {
 		t := textinput.New()
 		t.Placeholder = fd.placeholder
 		t.CharLimit = 2048
@@ -45,7 +66,7 @@ func newCompareConfig() compareConfigModel {
 		inputs[i] = t
 	}
 	inputs[0].Focus()
-	return compareConfigModel{inputs: inputs}
+	return compareConfigModel{inputs: inputs, fields: fields}
 }
 
 func (m *compareConfigModel) setWidth(w int) { m.width = w }
@@ -148,7 +169,7 @@ func (m compareConfigModel) view(width, height int) string {
 			sb.WriteString("\n")
 		}
 		for end := i + count; i < end && i < len(m.inputs); i++ {
-			label := labelStyle.Render(compareConfigFields[i].label + ":")
+			label := labelStyle.Render(m.fields[i].label + ":")
 			inp := m.inputs[i].View()
 			cursor := "  "
 			if i == m.focusIndex {

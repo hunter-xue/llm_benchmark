@@ -95,6 +95,9 @@ func startBench(
 			if cfg.Mode == bench.ModeEmbedding {
 				r := bench.RunEmbeddingBench(ctx, pv, cfg, testText, actualTokens, onProgress)
 				p.Send(BenchDoneMsg{ProviderIndex: idx, EmbeddingReport: &r})
+			} else if cfg.Mode == bench.ModeAnthropicMessages {
+				r := bench.RunAnthropicMessagesBench(ctx, pv, cfg, testText, actualTokens, tkm, onProgress)
+				p.Send(BenchDoneMsg{ProviderIndex: idx, CompletionReport: &r})
 			} else {
 				r := bench.RunCompletionBench(ctx, pv, cfg, testText, actualTokens, tkm, onProgress)
 				p.Send(BenchDoneMsg{ProviderIndex: idx, CompletionReport: &r})
@@ -109,26 +112,50 @@ func startBench(
 // the given user message directly (no benchmark text generation needed).
 func startCompareRequestsDirect(
 	p *tea.Program,
+	apiMode string,
 	providerA, providerB bench.ProviderConfig,
 	userMessage, systemPrompt string,
 	customParamsA, customParamsB string,
 ) tea.Cmd {
 	return func() tea.Msg {
-		cfg := bench.BenchConfig{
-			Mode:         bench.ModeCompletion,
-			SystemPrompt: systemPrompt,
-		}
+		cfg := bench.BenchConfig{SystemPrompt: systemPrompt}
 		customParams := [2]string{customParamsA, customParamsB}
 		for i, prov := range []bench.ProviderConfig{providerA, providerB} {
 			idx := i
 			pv := prov
 			cp := customParams[i]
 			go func() {
-				body, err := bench.DoCompareRequest(context.Background(), pv, cfg, userMessage, cp)
-				p.Send(CompareResponseMsg{ProviderIndex: idx, Body: body, Err: err})
+				var headers, body string
+				var err error
+				if apiMode == bench.ModeAnthropicMessages {
+					headers, body, err = bench.DoAnthropicCompareRequest(context.Background(), pv, cfg, userMessage, cp)
+				} else {
+					headers, body, err = bench.DoCompareRequest(context.Background(), pv, cfg, userMessage, cp)
+				}
+				p.Send(CompareResponseMsg{ProviderIndex: idx, Headers: headers, Body: body, Err: err})
 			}()
 		}
 		return nil
+	}
+}
+
+// startSingleResponseRequest launches one non-streaming request to a single provider.
+func startSingleResponseRequest(
+	p *tea.Program,
+	apiMode string,
+	provider bench.ProviderConfig,
+	userMessage, systemPrompt, customParams string,
+) tea.Cmd {
+	return func() tea.Msg {
+		cfg := bench.BenchConfig{SystemPrompt: systemPrompt}
+		var headers, body string
+		var err error
+		if apiMode == bench.ModeAnthropicMessages {
+			headers, body, err = bench.DoAnthropicCompareRequest(context.Background(), provider, cfg, userMessage, customParams)
+		} else {
+			headers, body, err = bench.DoCompareRequest(context.Background(), provider, cfg, userMessage, customParams)
+		}
+		return SingleResponseMsg{Headers: headers, Body: body, Err: err}
 	}
 }
 

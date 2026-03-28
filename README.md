@@ -1,15 +1,17 @@
 # embedding_benchmark
 
-针对 OpenAI 兼容 API 的交互式压测工具（TUI），支持两种 API 类型：
+针对 OpenAI 兼容 API 及 Anthropic Messages API 的交互式压测工具（TUI），支持三种 API 类型：
 
 - **Embedding 模式**：测试 `/v1/embeddings` 端点的吞吐与延迟
 - **Chat Completion 模式**：测试 `/v1/chat/completions` 端点的流式生成性能，包含 TTFT、TPOT、E2E 等指标
+- **Anthropic Messages 模式**：测试 Anthropic Messages API（`/v1/messages`），使用 `x-api-key` 鉴权，功能与 Chat Completion 完全一致
 
-支持三种测试模式：
+支持四种测试模式（Embedding 仅支持前两种）：
 
 - **Single Provider**：单 Provider 压测
+- **Single Response View**：向单个 Provider 发送一条 Prompt，查看原始 JSON 响应及 HTTP 响应头
 - **PK Mode**：两个 Provider 同时压测，结果并排对比，优胜指标绿色高亮
-- **Response Compare**（仅 Chat Completion）：向两个 Provider 发送同一条 Prompt，左右分栏展示原始 JSON 响应，用于对比输出质量
+- **Response Compare**：向两个 Provider 发送同一条 Prompt，左右分栏展示原始 JSON 响应及 HTTP 响应头
 
 ---
 
@@ -65,10 +67,10 @@ build/
 
 启动后进入 TUI 界面，按提示依次选择：
 
-1. **API 类型**：Embedding 或 Chat Completion
-2. **测试模式**：Single Provider / PK Mode / Response Compare
-3. **参数配置**：填写 URL、API Key、模型名等
-4. **`ctrl+s`** 启动，实时显示进度（压测模式）或直接进入对比界面（Response Compare）
+1. **API 类型**：Embedding / Chat Completion / Anthropic Messages
+2. **测试模式**：Single Provider / Single Response View / PK Mode / Response Compare
+3. **参数配置**：填写 URL、API Key、模型名等（占位符根据 API 类型自动切换）
+4. **`ctrl+s`** 启动，实时显示进度（压测模式）或直接进入响应查看界面
 5. 压测完成后查看结果；**`r`** 重新配置，**`esc`** 返回上级菜单，**`ctrl+c`** 退出
 
 ### 通用快捷键
@@ -88,15 +90,18 @@ build/
 |--------|------|
 | `r` | 重新配置并再次压测 |
 | `e` | 查看错误日志（有错误时可用） |
+| `ctrl+e` | 导出结果到文本文件 |
 | `esc` | 返回上级菜单 |
 | `ctrl+c` | 退出 |
 
-### Response Compare 界面快捷键
+### Response Compare / Single Response View 快捷键
 
 | 快捷键 | 说明 |
 |--------|------|
-| `tab` | 切换左/右面板焦点 |
-| `↑` / `↓` / `pgup` / `pgdn` | 滚动当前面板 |
+| `j` / `k` | 逐行向下 / 向上滚动 |
+| `ctrl+d` / `ctrl+u` | 向下 / 向上翻半页 |
+| `tab` | 切换左/右面板焦点（仅 Response Compare） |
+| `ctrl+e` | 导出响应内容到文本文件 |
 | `esc` | 返回配置页 |
 
 ---
@@ -112,7 +117,7 @@ build/
 | **Input TPM** | 每分钟处理的输入 Token 数 |
 | **Latency Avg/P50/P90/P99** | E2E 延迟分布（ms） |
 
-### Chat Completion 模式
+### Chat Completion / Anthropic Messages 模式
 
 所有指标**完全基于客户端本地时间测量**，不依赖 API 响应体中的 `usage` 字段。
 
@@ -131,7 +136,8 @@ build/
 ## 注意事项
 
 - BPE 词表文件 `cl100k_base.tiktoken` 须在本地可访问，工具不会联网下载；文件缺失时启动报错并退出
-- Completion 压测使用 `"stream": true`，目标 API 须支持 SSE 流式输出
-- Response Compare 使用 `"stream": false`，输出长度使用各 Provider API 默认值
+- Completion / Anthropic Messages 压测使用流式输出（`"stream": true`），目标 API 须支持 SSE
+- Anthropic Messages 模式 SSE 以 `event: message_stop` 结束，`max_tokens` 为必填字段（默认 4096）
+- Response Compare / Single Response View 使用非流式请求（`"stream": false`），响应头与 JSON body 均展示
 - 所有压测统计仅包含**成功请求**，失败请求不计入延迟分布
 - 非 200 响应的错误信息会包含服务端响应体（最多 512 字节），便于排查认证、限流问题
