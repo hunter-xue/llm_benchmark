@@ -159,6 +159,28 @@ func startSingleResponseRequest(
 	}
 }
 
+// startCacheHitTest launches repeated non-streaming Chat Completions requests.
+func startCacheHitTest(
+	p *tea.Program,
+	provider bench.ProviderConfig,
+	cfg bench.CacheHitConfig,
+	userPrompt string,
+) (tea.Cmd, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		onProgress := func(completed, errors int) {
+			p.Send(ProgressMsg{
+				ProviderIndex: 0,
+				Completed:     completed,
+				TotalErrors:   errors,
+			})
+		}
+		r := bench.RunCacheHitTest(ctx, provider, cfg, userPrompt, onProgress)
+		p.Send(CacheHitDoneMsg{Report: &r})
+	}()
+	return nil, cancel
+}
+
 func prepareBenchText(cfg bench.BenchConfig, tkm *tiktoken.Tiktoken) (string, int, error) {
 	text, err := bench.GenerateTextByTokens(tkm, cfg.TargetTokens)
 	if err != nil {

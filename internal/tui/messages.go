@@ -30,3 +30,8 @@ type SingleResponseMsg struct {
 	Body    string // pretty-printed JSON on success
 	Err     error
 }
+
+// CacheHitDoneMsg is sent when the prompt cache hit test finishes.
+type CacheHitDoneMsg struct {
+	Report *bench.CacheHitReport
+}

@@ -6,12 +6,13 @@
 - **Chat Completion 模式**：测试 `/v1/chat/completions` 端点的流式生成性能，包含 TTFT、TPOT、E2E 等指标
 - **Anthropic Messages 模式**：测试 Anthropic Messages API（`/v1/messages`），使用 `x-api-key` 鉴权，功能与 Chat Completion 完全一致
 
-支持四种测试模式（Embedding 仅支持前两种）：
+支持以下测试模式（Embedding 仅支持前两种）：
 
 - **Single Provider**：单 Provider 压测
 - **Single Response View**：向单个 Provider 发送一条 Prompt，查看原始 JSON 响应及 HTTP 响应头
 - **PK Mode**：两个 Provider 同时压测，结果并排对比，优胜指标绿色高亮
 - **Response Compare**：向两个 Provider 发送同一条 Prompt，左右分栏展示原始 JSON 响应及 HTTP 响应头
+- **Prompt Cache Hit Test**：仅 Chat Completion 支持，重复发送同一大段 Prompt，并从 `usage.prompt_tokens_details.cached_tokens` 展示缓存命中情况
 
 ---
 
@@ -130,6 +131,18 @@ build/
 | **Avg Output Tokens** | 每次请求平均输出的 token 数 |
 
 > 输出 token 数通过 **tiktoken（cl100k_base）本地编码**计数，不使用 API 的 `usage.completion_tokens`，在任何不返回 `usage` 的 API 实现上也能正确统计。
+
+### Prompt Cache Hit Test
+
+该模式使用非流式 Chat Completions 请求，每隔 3 秒重复发送用户粘贴的同一段 Prompt，并读取响应体中的 `usage.prompt_tokens_details.cached_tokens`。`Max Output Tokens` 为可选参数，留空时请求体不发送 `max_tokens`。
+
+| 指标 | 说明 |
+|---|---|
+| **Cached Tokens** | 响应 `usage.prompt_tokens_details.cached_tokens` 的累计值 |
+| **Overall Hit Rate** | 累计 cached tokens / 累计 prompt tokens |
+| **Avg Request Hit Rate** | 每次请求命中率的平均值 |
+
+若 Provider 不返回 `usage` 或不返回 `cached_tokens` 字段，结果中会显示 `N/A` / missing 计数，不会按 0 命中处理。可通过 Custom Params 传入 `prompt_cache_key`、`prompt_cache_retention` 等兼容参数。
 
 ---
 

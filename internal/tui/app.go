@@ -24,6 +24,9 @@ const (
 	ScreenResponseCompare
 	ScreenSingleResponseConfig
 	ScreenSingleResponse
+	ScreenCacheHitConfig
+	ScreenCacheHitRunning
+	ScreenCacheHitResults
 )
 
 // prog holds the global program reference so goroutines can call p.Send().
@@ -71,6 +74,10 @@ type Model struct {
 	singleResponseConfig singleResponseConfigModel
 	singleResponse       singleResponseModel
 
+	// Prompt cache hit test flow
+	cacheHitConfig  cacheHitConfigModel
+	cacheHitResults cacheHitResultsModel
+
 	// Export overlay
 	export exportModel
 
@@ -106,6 +113,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.responseCompare.setSize(m.width, m.height)
 		m.singleResponseConfig.setWidth(m.width)
 		m.singleResponse.setSize(m.width, m.height)
+		m.cacheHitConfig.setWidth(m.width)
+		m.cacheHitResults.setWidth(m.width)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -163,6 +172,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case CacheHitDoneMsg:
+		m.cacheHitResults.setReport(msg.Report)
+		m.errorViewport.setContent(m.cacheHitResults.errorDetails())
+		m.screen = ScreenCacheHitResults
+		return m, nil
+
 	case CompareResponseMsg:
 		m.responseCompare.setResponse(msg.ProviderIndex, msg.Headers, msg.Body, msg.Err)
 		m.compareDone++
@@ -173,7 +188,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		if m.screen == ScreenRunning {
+		if m.screen == ScreenRunning || m.screen == ScreenCacheHitRunning {
 			var cmd tea.Cmd
 			m.running, cmd = m.running.update(msg)
 			return m, cmd
@@ -192,7 +207,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Delegate to active screen for component messages (progress frame, etc.)
-	if m.screen == ScreenRunning {
+	if m.screen == ScreenRunning || m.screen == ScreenCacheHitRunning {
 		var cmd tea.Cmd
 		m.running, cmd = m.running.update(msg)
 		return m, cmd
@@ -235,6 +250,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.singleResponseConfig.setWidth(m.width)
 				m.screen = ScreenSingleResponseConfig
 				return m, m.singleResponseConfig.inputs[0].Focus()
+			case "cache_hit":
+				m.cacheHitConfig = newCacheHitConfig()
+				m.cacheHitConfig.setWidth(m.width)
+				m.screen = ScreenCacheHitConfig
+				return m, m.cacheHitConfig.inputs[0].Focus()
 			default:
 				m.config = newConfigModel(m.apiMode, m.testMode)
 				m.screen = ScreenConfig
@@ -395,6 +415,64 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.singleResponse, cmd = m.singleResponse.update(msg)
 			return m, cmd
 		}
+
+	case ScreenCacheHitConfig:
+		switch msg.String() {
+		case "esc":
+			m.screen = ScreenTestModeSelect
+			return m, nil
+		case "ctrl+s":
+			res, err := m.cacheHitConfig.validate()
+			if err != nil {
+				m.cacheHitConfig.err = err.Error()
+				return m, nil
+			}
+			m.cacheHitConfig.err = ""
+			return m.startCacheHitRunning(res.provider, res.cfg, res.userPrompt)
+		default:
+			var cmd tea.Cmd
+			m.cacheHitConfig, cmd = m.cacheHitConfig.update(msg)
+			return m, cmd
+		}
+
+	case ScreenCacheHitRunning:
+		switch msg.String() {
+		case "e":
+			if m.running.hasErrors {
+				m.showErrors = true
+				m.errorViewport.setSize(m.width-4, m.height-4)
+			}
+			return m, nil
+		case "esc":
+			if m.cancelFunc != nil {
+				m.cancelFunc()
+				m.cancelFunc = nil
+			}
+			m.screen = ScreenCacheHitConfig
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.running, cmd = m.running.update(msg)
+		return m, cmd
+
+	case ScreenCacheHitResults:
+		switch msg.String() {
+		case "esc":
+			m.screen = ScreenCacheHitConfig
+			return m, nil
+		case "r":
+			m.screen = ScreenCacheHitConfig
+			return m, nil
+		case "e":
+			if m.cacheHitResults.hasErrors() {
+				m.showErrors = true
+				m.errorViewport.setSize(m.width-4, m.height-4)
+			}
+			return m, nil
+		case "ctrl+e":
+			plain := stripANSI(m.cacheHitResults.view(m.width, m.height))
+			return m, m.export.activate(plain)
+		}
 	}
 	return m, nil
 }
@@ -410,6 +488,26 @@ func (m Model) startRunning() (tea.Model, tea.Cmd) {
 	m.screen = ScreenRunning
 
 	cmd, cancel := startBench(prog, m.providers, m.cfg, m.tkm)
+	m.cancelFunc = cancel
+
+	return m, tea.Batch(m.running.spinner.Tick, cmd)
+}
+
+func (m Model) startCacheHitRunning(provider bench.ProviderConfig, cfg bench.CacheHitConfig, userPrompt string) (tea.Model, tea.Cmd) {
+	m.providers = []bench.ProviderConfig{provider}
+	m.running = newRunningModel(m.providers, bench.BenchConfig{
+		Mode:          bench.ModeCompletion,
+		TotalRequests: cfg.TestCount,
+	})
+	m.running.setWidth(m.width)
+	m.cacheHitResults = newCacheHitResultsModel()
+	m.cacheHitResults.setWidth(m.width)
+	m.errorViewport = newErrorViewport()
+	m.errorViewport.setSize(m.width-4, m.height-4)
+	m.showErrors = false
+	m.screen = ScreenCacheHitRunning
+
+	cmd, cancel := startCacheHitTest(prog, provider, cfg, userPrompt)
 	m.cancelFunc = cancel
 
 	return m, tea.Batch(m.running.spinner.Tick, cmd)
@@ -444,6 +542,12 @@ func (m Model) View() string {
 		content = m.singleResponseConfig.view(m.width, m.height)
 	case ScreenSingleResponse:
 		content = m.singleResponse.view(m.width, m.height)
+	case ScreenCacheHitConfig:
+		content = m.cacheHitConfig.view(m.width, m.height)
+	case ScreenCacheHitRunning:
+		content = m.running.view(m.width, m.height)
+	case ScreenCacheHitResults:
+		content = m.cacheHitResults.view(m.width, m.height)
 	default:
 		content = "Loading..."
 	}
@@ -453,7 +557,7 @@ func (m Model) View() string {
 		overlay := m.errorViewport.view()
 		return overlayOnTop(content, overlay, m.width, m.height)
 	}
-	exportScreen := m.screen == ScreenResults || m.screen == ScreenResponseCompare || m.screen == ScreenSingleResponse
+	exportScreen := m.screen == ScreenResults || m.screen == ScreenResponseCompare || m.screen == ScreenSingleResponse || m.screen == ScreenCacheHitResults
 	if exportScreen && (m.export.active || m.export.status != "") {
 		return content + "\n" + m.export.view()
 	}
