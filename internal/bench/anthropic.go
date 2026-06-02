@@ -248,6 +248,7 @@ func doAnthropicRequest(
 		gotFirstToken  bool
 		skippedChunks  int
 		eventType      string
+		rawSample      strings.Builder
 	)
 
 	scanner := bufio.NewScanner(resp.Body)
@@ -255,6 +256,10 @@ func doAnthropicRequest(
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		if !gotFirstToken && rawSample.Len() < 2048 {
+			rawSample.WriteString(line)
+			rawSample.WriteByte('\n')
+		}
 		if strings.HasPrefix(line, "event:") {
 			eventType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
 			if eventType == "message_stop" {
@@ -291,7 +296,8 @@ func doAnthropicRequest(
 	}
 
 	if !gotFirstToken {
-		res.Err = fmt.Errorf("no output tokens received")
+		res.Err = fmt.Errorf("no output tokens received (skipped %d chunks, raw sample:\n%s)",
+			skippedChunks, rawSample.String())
 		return res
 	}
 

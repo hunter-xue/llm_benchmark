@@ -20,7 +20,7 @@ func (m testModeSelectModel) maxCursor() int {
 	if m.apiMode == "completion" {
 		return 4
 	}
-	if m.apiMode == "anthropic_messages" {
+	if m.apiMode == "anthropic" {
 		return 3
 	}
 	return 1
@@ -58,7 +58,7 @@ func (m testModeSelectModel) selected() string {
 			return "cache_hit"
 		}
 	}
-	if m.apiMode == "anthropic_messages" {
+	if m.apiMode == "anthropic" {
 		switch m.cursor {
 		case 0:
 			return "single"
@@ -87,7 +87,7 @@ func (m testModeSelectModel) view(width, height int) string {
 	switch m.apiMode {
 	case "completion":
 		modeLabel = "Chat Completion"
-	case "anthropic_messages":
+	case "anthropic":
 		modeLabel = "Anthropic Messages"
 	}
 	sb.WriteString(subtitleStyle.Render(fmt.Sprintf("Mode: %s", modeLabel)))
@@ -104,7 +104,7 @@ func (m testModeSelectModel) view(width, height int) string {
 			{"Response Compare", "Send a prompt to two providers and compare outputs"},
 			{"Prompt Cache Hit Test", "Repeat one prompt and report cached tokens from usage"},
 		}
-	} else if m.apiMode == "anthropic_messages" {
+	} else if m.apiMode == "anthropic" {
 		items = []struct{ label, desc string }{
 			{"Single Provider", "Benchmark one provider's API"},
 			{"Single Response View", "Send a prompt to one provider and view the raw JSON response"},

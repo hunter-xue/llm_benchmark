@@ -12,7 +12,7 @@ import (
 const (
 	ModeEmbedding         = "embedding"
 	ModeCompletion        = "completion"
-	ModeAnthropicMessages = "anthropic_messages"
+	ModeAnthropic = "anthropic"
 )
 
 // ProviderConfig holds the per-provider settings used in benchmarks.
@@ -107,4 +107,11 @@ func NormalizeURL(raw string) (string, error) {
 		return "", fmt.Errorf("URL must include a scheme and host, e.g. http://127.0.0.1:3000/v1/embeddings")
 	}
 	return parsed.String(), nil
+}
+
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }

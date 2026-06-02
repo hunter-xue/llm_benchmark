@@ -12,7 +12,7 @@ import (
 
 func buildSingleResponseConfigFields(apiMode string) []fieldDef {
 	customParamsPlaceholder := `optional JSON, e.g. {"temperature":0.7}`
-	if apiMode == "anthropic_messages" {
+	if apiMode == "anthropic" {
 		return []fieldDef{
 			{label: "API URL", placeholder: "https://api.anthropic.com/v1/messages"},
 			{label: "API Key", placeholder: "sk-ant-...", password: true},

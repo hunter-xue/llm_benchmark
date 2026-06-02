@@ -254,6 +254,7 @@ func doCompletionRequest(
 		outputBuf      strings.Builder
 		gotFirstToken  bool
 		skippedChunks  int
+		rawSample      strings.Builder
 	)
 
 	scanner := bufio.NewScanner(resp.Body)
@@ -261,6 +262,10 @@ func doCompletionRequest(
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		if !gotFirstToken && rawSample.Len() < 2048 {
+			rawSample.WriteString(line)
+			rawSample.WriteByte('\n')
+		}
 		if !strings.HasPrefix(line, "data:") {
 			continue
 		}
@@ -299,7 +304,8 @@ func doCompletionRequest(
 	}
 
 	if !gotFirstToken {
-		res.Err = fmt.Errorf("no output tokens received")
+		res.Err = fmt.Errorf("no output tokens received (skipped %d chunks, raw sample:\n%s)",
+			skippedChunks, rawSample.String())
 		return res
 	}
 

@@ -42,7 +42,7 @@ func (m modeSelectModel) selected() string {
 	case 1:
 		return "completion"
 	case 2:
-		return "anthropic_messages"
+		return "anthropic"
 	}
 	return "embedding"
 }

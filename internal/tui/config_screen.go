@@ -53,7 +53,7 @@ func newConfigModel(apiMode, testMode string) configModel {
 
 func buildFieldDefs(apiMode, testMode string) []fieldDef {
 	isCompletion    := apiMode == "completion"
-	isAnthropicMsg  := apiMode == "anthropic_messages"
+	isAnthropicMsg  := apiMode == "anthropic"
 	isCompletionLike := isCompletion || isAnthropicMsg
 	isPK := testMode == "pk"
 
@@ -170,7 +170,7 @@ func (m configModel) validate() ([]bench.ProviderConfig, bench.BenchConfig, erro
 
 	isPK            := m.testMode == "pk"
 	isCompletion    := m.apiMode == "completion"
-	isAnthropicMsg  := m.apiMode == "anthropic_messages"
+	isAnthropicMsg  := m.apiMode == "anthropic"
 	isCompletionLike := isCompletion || isAnthropicMsg
 
 	parseInt := func(s, name string) (int, error) {
@@ -218,7 +218,7 @@ func (m configModel) validate() ([]bench.ProviderConfig, bench.BenchConfig, erro
 
 		mode := bench.ModeEmbedding
 		if isCompletion   { mode = bench.ModeCompletion }
-		if isAnthropicMsg { mode = bench.ModeAnthropicMessages }
+		if isAnthropicMsg { mode = bench.ModeAnthropic }
 		cfg := bench.BenchConfig{
 			Mode:          mode,
 			Concurrency:   c,
@@ -263,7 +263,7 @@ func (m configModel) validate() ([]bench.ProviderConfig, bench.BenchConfig, erro
 
 	mode := bench.ModeEmbedding
 	if isCompletion   { mode = bench.ModeCompletion }
-	if isAnthropicMsg { mode = bench.ModeAnthropicMessages }
+	if isAnthropicMsg { mode = bench.ModeAnthropic }
 	cfg := bench.BenchConfig{
 		Mode:          mode,
 		Concurrency:   c,
@@ -288,7 +288,7 @@ func (m configModel) view(width, height int) string {
 	switch m.apiMode {
 	case "completion":
 		apiLabel = "Chat Completion"
-	case "anthropic_messages":
+	case "anthropic":
 		apiLabel = "Anthropic Messages"
 	}
 	testLabel := "Single Provider"

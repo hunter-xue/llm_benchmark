@@ -13,7 +13,7 @@ import (
 
 func buildCompareConfigFields(apiMode string) []fieldDef {
 	customParamsPlaceholder := `optional JSON, e.g. {"temperature":0.7,"top_p":0.9}`
-	if apiMode == "anthropic_messages" {
+	if apiMode == "anthropic" {
 		return []fieldDef{
 			{label: "Provider A Name", placeholder: "e.g. Claude Haiku"},
 			{label: "Provider A URL", placeholder: "https://api.anthropic.com/v1/messages"},
@@ -95,8 +95,8 @@ type compareConfigResult struct {
 	providerB     bench.ProviderConfig
 	userMessage   string
 	systemPrompt  string
-	customParamsA string // validated JSON object string, may be empty
-	customParamsB string // validated JSON object string, may be empty
+	customParamsA string
+	customParamsB string
 }
 
 func validateCustomParams(raw, label string) (string, error) {

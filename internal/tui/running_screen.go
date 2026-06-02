@@ -95,7 +95,7 @@ func startBench(
 			if cfg.Mode == bench.ModeEmbedding {
 				r := bench.RunEmbeddingBench(ctx, pv, cfg, testText, actualTokens, onProgress)
 				p.Send(BenchDoneMsg{ProviderIndex: idx, EmbeddingReport: &r})
-			} else if cfg.Mode == bench.ModeAnthropicMessages {
+			} else if cfg.Mode == bench.ModeAnthropic {
 				r := bench.RunAnthropicMessagesBench(ctx, pv, cfg, testText, actualTokens, tkm, onProgress)
 				p.Send(BenchDoneMsg{ProviderIndex: idx, CompletionReport: &r})
 			} else {
@@ -127,7 +127,7 @@ func startCompareRequestsDirect(
 			go func() {
 				var headers, body string
 				var err error
-				if apiMode == bench.ModeAnthropicMessages {
+				if apiMode == bench.ModeAnthropic {
 					headers, body, err = bench.DoAnthropicCompareRequest(context.Background(), pv, cfg, userMessage, cp)
 				} else {
 					headers, body, err = bench.DoCompareRequest(context.Background(), pv, cfg, userMessage, cp)
@@ -150,7 +150,7 @@ func startSingleResponseRequest(
 		cfg := bench.BenchConfig{SystemPrompt: systemPrompt}
 		var headers, body string
 		var err error
-		if apiMode == bench.ModeAnthropicMessages {
+		if apiMode == bench.ModeAnthropic {
 			headers, body, err = bench.DoAnthropicCompareRequest(context.Background(), provider, cfg, userMessage, customParams)
 		} else {
 			headers, body, err = bench.DoCompareRequest(context.Background(), provider, cfg, userMessage, customParams)

@@ -37,7 +37,6 @@ func (m *responseCompareModel) setSize(w, h int) {
 	m.width = w
 	m.height = h
 
-	// Each panel: half width minus border/padding, height minus header+footer
 	panelW := w/2 - 4
 	panelH := h - 6
 	if panelW < 10 {
@@ -147,22 +146,18 @@ func (m responseCompareModel) view(w, h int) string {
 		return titleStyle.Render("Response Comparison") + "\n\n" + dimStyle.Render("  Initializing...")
 	}
 
-	// Header
 	var sb strings.Builder
 	sb.WriteString(titleStyle.Render("Response Comparison"))
 	sb.WriteString("\n")
 	sb.WriteString(subtitleStyle.Render("One request sent to each provider with the same prompt"))
 	sb.WriteString("\n\n")
 
-	// Build each panel
 	panelA := m.renderPanel(m.vpA, m.nameA, m.focused == 0, m.loadingA)
 	panelB := m.renderPanel(m.vpB, m.nameB, m.focused == 1, m.loadingB)
 
-	// Join panels side by side
 	panels := lipgloss.JoinHorizontal(lipgloss.Top, panelA, "  ", panelB)
 	sb.WriteString(panels)
 
-	// Footer help
 	focusedName := m.nameA
 	if m.focused == 1 {
 		focusedName = m.nameB
@@ -176,7 +171,6 @@ func (m responseCompareModel) view(w, h int) string {
 }
 
 func (m responseCompareModel) renderPanel(vp viewport.Model, name string, focused bool, loading bool) string {
-	// Panel title
 	titleStr := name
 	if focused {
 		titleStr = selectedItemStyle.Render("▶ " + name)
@@ -184,7 +178,6 @@ func (m responseCompareModel) renderPanel(vp viewport.Model, name string, focuse
 		titleStr = dimStyle.Render("  " + name)
 	}
 
-	// Scroll indicator
 	scrollPct := ""
 	if !loading {
 		scrollPct = dimStyle.Render(fmt.Sprintf("  %3.f%%", vp.ScrollPercent()*100))
