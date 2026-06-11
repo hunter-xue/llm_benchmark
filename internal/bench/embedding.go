@@ -32,7 +32,7 @@ func RunEmbeddingBench(
 	cfg BenchConfig,
 	testText string,
 	actualInputTokens int,
-	onProgress func(completed, errors int),
+	onProgress func(ProgressUpdate),
 ) EmbeddingReport {
 	results := make(chan embeddingResult, cfg.TotalRequests)
 	taskQueue := make(chan struct{}, cfg.TotalRequests)
@@ -42,7 +42,7 @@ func RunEmbeddingBench(
 	close(taskQueue)
 
 	var (
-		wg       sync.WaitGroup
+		wg         sync.WaitGroup
 		succAtomic int64
 		errAtomic  int64
 	)
@@ -64,7 +64,15 @@ func RunEmbeddingBench(
 					atomic.AddInt64(&succAtomic, 1)
 				}
 				if onProgress != nil {
-					onProgress(int(atomic.LoadInt64(&succAtomic)), int(atomic.LoadInt64(&errAtomic)))
+					update := ProgressUpdate{
+						Completed: int(atomic.LoadInt64(&succAtomic)),
+						Errors:    int(atomic.LoadInt64(&errAtomic)),
+					}
+					if res.Err != nil {
+						update.ErrorDetail = res.Err.Error()
+						update.ErrorCategory = ClassifyError(res.Err)
+					}
+					onProgress(update)
 				}
 			}
 		}()
@@ -78,11 +86,12 @@ func RunEmbeddingBench(
 	totalTokens := 0
 	errors := 0
 	errorDetails := make(map[string]int)
+	errorCategories := make(map[string]int)
 
 	for r := range results {
 		if r.Err != nil {
 			errors++
-			errorDetails[r.Err.Error()]++
+			recordError(errorDetails, errorCategories, r.Err)
 		} else {
 			latencies = append(latencies, float64(r.Duration.Milliseconds()))
 			totalTokens += r.Tokens
@@ -92,12 +101,13 @@ func RunEmbeddingBench(
 
 	successCount := len(latencies)
 	report := EmbeddingReport{
-		TotalRequests: cfg.TotalRequests,
-		SuccessCount:  successCount,
-		ErrorCount:    errors,
-		WallTime:      wallTime,
-		ErrorDetails:  errorDetails,
-		Valid:         successCount > 0,
+		TotalRequests:   cfg.TotalRequests,
+		SuccessCount:    successCount,
+		ErrorCount:      errors,
+		WallTime:        wallTime,
+		ErrorDetails:    errorDetails,
+		ErrorCategories: errorCategories,
+		Valid:           successCount > 0,
 	}
 	if successCount > 0 && wallTime.Seconds() > 0 {
 		report.RPS = float64(successCount) / wallTime.Seconds()

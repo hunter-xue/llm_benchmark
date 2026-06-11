@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## Build & Run
 
@@ -17,7 +17,7 @@ go build -o embedding_benchmark .
 
 ## Architecture
 
-The project is a TUI benchmark tool for OpenAI-compatible embedding/chat completion APIs and Anthropic Messages APIs, built with [bubbletea](https://github.com/charmbracelet/bubbletea).
+The project is a TUI benchmark tool for OpenAI-compatible embedding and chat completion APIs, built with [bubbletea](https://github.com/charmbracelet/bubbletea).
 
 ### Package Layout
 
@@ -32,8 +32,6 @@ internal/
     stats.go                    -- percentile, average, EmbeddingReport, CompletionReport structs
     embedding.go                -- RunEmbeddingBench (concurrent, returns report)
     completion.go               -- RunCompletionBench + doCompletionRequest (streaming SSE)
-    anthropic.go                -- RunAnthropicMessagesBench + Anthropic SSE parsing
-    cache_hit.go                -- RunCacheHitTest + usage.prompt_tokens_details.cached_tokens parsing
   tui/
     app.go                      -- Root Model, screen state machine, global prog var
     styles.go                   -- lipgloss style constants
@@ -44,12 +42,6 @@ internal/
     config_screen.go            -- Screen: parameter input form (textinput fields)
     running_screen.go           -- Screen: progress bars, spinner, async bench dispatch
     results_screen.go           -- Screen: results table, PK comparison with green winner
-    single_response_config.go   -- Screen: one-off response request config
-    single_response.go          -- Screen: one-off response viewport
-    response_compare_config.go  -- Screen: two-provider response compare config
-    response_compare.go         -- Screen: side-by-side response viewports
-    cache_hit_config.go         -- Screen: prompt cache hit test config
-    cache_hit_results.go        -- Screen: prompt cache hit result table
     error_viewport.go           -- Overlay: scrollable error log (bubbles/viewport)
 ```
 

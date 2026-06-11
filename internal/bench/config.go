@@ -34,6 +34,14 @@ type BenchConfig struct {
 	SystemPrompt    string // completion only
 }
 
+// ProgressUpdate reports benchmark progress and optional per-request error details.
+type ProgressUpdate struct {
+	Completed     int
+	Errors        int
+	ErrorDetail   string
+	ErrorCategory string
+}
+
 // MergeCustomParams merges a JSON object string into an already-marshaled request
 // body. Keys in customParams override existing keys. Returns body unchanged on
 // any error so the request still proceeds with the standard payload.

@@ -43,6 +43,7 @@ type CacheHitReport struct {
 	MissingUsageCount  int
 	MissingCachedCount int
 	ErrorDetails       map[string]int
+	ErrorCategories    map[string]int
 	Valid              bool
 }
 
@@ -66,16 +67,17 @@ func RunCacheHitTest(
 	provider ProviderConfig,
 	cfg CacheHitConfig,
 	userPrompt string,
-	onProgress func(completed, errors int),
+	onProgress func(ProgressUpdate),
 ) CacheHitReport {
 	if cfg.Interval <= 0 {
 		cfg.Interval = 3 * time.Second
 	}
 
 	report := CacheHitReport{
-		TotalRequests: cfg.TestCount,
-		Results:       make([]CacheHitResult, 0, cfg.TestCount),
-		ErrorDetails:  make(map[string]int),
+		TotalRequests:   cfg.TestCount,
+		Results:         make([]CacheHitResult, 0, cfg.TestCount),
+		ErrorDetails:    make(map[string]int),
+		ErrorCategories: make(map[string]int),
 	}
 	client := &http.Client{Timeout: 120 * time.Second}
 	start := time.Now()
@@ -89,9 +91,14 @@ func RunCacheHitTest(
 				result := CacheHitResult{Index: i + 1, Err: ctx.Err()}
 				report.Results = append(report.Results, result)
 				report.ErrorCount++
-				report.ErrorDetails[ctx.Err().Error()]++
+				recordError(report.ErrorDetails, report.ErrorCategories, ctx.Err())
 				if onProgress != nil {
-					onProgress(report.SuccessCount, report.ErrorCount)
+					onProgress(ProgressUpdate{
+						Completed:     report.SuccessCount,
+						Errors:        report.ErrorCount,
+						ErrorDetail:   ctx.Err().Error(),
+						ErrorCategory: ClassifyError(ctx.Err()),
+					})
 				}
 				report.WallTime = time.Since(start)
 				return finalizeCacheHitReport(report)
@@ -103,12 +110,17 @@ func RunCacheHitTest(
 		report.Results = append(report.Results, result)
 		if result.Err != nil {
 			report.ErrorCount++
-			report.ErrorDetails[result.Err.Error()]++
+			recordError(report.ErrorDetails, report.ErrorCategories, result.Err)
 		} else {
 			report.SuccessCount++
 		}
 		if onProgress != nil {
-			onProgress(report.SuccessCount, report.ErrorCount)
+			update := ProgressUpdate{Completed: report.SuccessCount, Errors: report.ErrorCount}
+			if result.Err != nil {
+				update.ErrorDetail = result.Err.Error()
+				update.ErrorCategory = ClassifyError(result.Err)
+			}
+			onProgress(update)
 		}
 	}
 

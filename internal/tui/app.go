@@ -151,6 +151,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ProgressMsg:
 		var cmd tea.Cmd
 		m.running, cmd = m.running.update(msg)
+		if msg.ErrorDetail != "" || msg.ErrorCategory != "" {
+			m.errorViewport.setContent(m.running.errorCategories, m.running.errorDetails)
+		}
 		return m, cmd
 
 	case BenchDoneMsg:
@@ -164,7 +167,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.doneProviders++
 
 		// Refresh error viewport content
-		m.errorViewport.setContent(m.results.mergedErrorDetails())
+		m.errorViewport.setContent(m.results.mergedErrorCategories(), m.results.mergedErrorDetails())
 
 		if m.doneProviders >= len(m.providers) {
 			// All done — go to results
@@ -174,7 +177,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case CacheHitDoneMsg:
 		m.cacheHitResults.setReport(msg.Report)
-		m.errorViewport.setContent(m.cacheHitResults.errorDetails())
+		m.errorViewport.setContent(m.cacheHitResults.errorCategories(), m.cacheHitResults.errorDetails())
 		m.screen = ScreenCacheHitResults
 		return m, nil
 
@@ -293,6 +296,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.running.hasErrors {
 				m.showErrors = true
 				m.errorViewport.setSize(m.width-4, m.height-4)
+				m.errorViewport.setContent(m.running.errorCategories, m.running.errorDetails)
 			}
 			return m, nil
 		case "esc":

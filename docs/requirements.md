@@ -1,8 +1,8 @@
 # 需求描述文档
 
 **项目**：embedding_benchmark
-**文档版本**：v2.3
-**最后更新**：2026-03-28
+**文档版本**：v2.4
+**最后更新**：2026-06-11
 
 ---
 
@@ -40,7 +40,7 @@
 |----|------|------|
 | F-20 | 使用 [bubbletea](https://github.com/charmbracelet/bubbletea) 框架实现 TUI 界面 | ✅ 已实现 |
 | F-21 | 启动后用户首先选择 API 类型（Embedding / Chat Completion / Anthropic Messages） | ✅ 已实现 |
-| F-22 | 选择 API 类型后，选择测试模式；Chat Completion / Anthropic Messages 显示 4 项（Single Provider / Single Response View / PK Mode / Response Compare），Embedding 显示 2 项（Single Provider / PK Mode） | ✅ 已实现 |
+| F-22 | 选择 API 类型后，选择测试模式；Chat Completion 显示 5 项（Single Provider / Single Response View / PK Mode / Response Compare / Prompt Cache Hit Test），Anthropic Messages 显示 4 项，Embedding 显示 2 项 | ✅ 已实现 |
 | F-23 | 通过表单界面输入压测参数，`tab` / `shift+tab` 切换字段 | ✅ 已实现 |
 | F-24 | 输入框以 placeholder 形式展示示例值，字段初始为空；占位符根据 API 类型自动切换（如 Anthropic 显示 `sk-ant-...`、`https://api.anthropic.com/v1/messages`） | ✅ 已实现 |
 | F-25 | `ctrl+s` 提交配置并启动压测 / 发送请求 | ✅ 已实现 |
@@ -66,6 +66,7 @@
 | F-44 | 若某 Provider 所有请求均失败（无有效指标），对应列显示"N/A" | ✅ 已实现 |
 | F-45 | 结果页按 `r` 返回配置界面重新运行 | ✅ 已实现 |
 | F-46 | Completion / Anthropic Messages 结果展示中，TTFT / TPOT / E2E 三组指标之间添加分隔线 | ✅ 已实现 |
+| F-47 | Completion / Anthropic Messages 结果展示 API 返回的原始 prompt / completion / total token 累计值，并显示实际返回 usage 的成功请求数 | ✅ 已实现 |
 
 ### 2.6 错误日志
 
@@ -83,10 +84,12 @@
 |----|------|------|
 | F-60 | Embedding：统计 RPS、Input TPS、Input TPM、E2E Latency（Avg/P50/P90/P99） | ✅ 已实现 |
 | F-61 | Completion / Anthropic Messages：统计 RPS、Input/Output TPS、Input/Output TPM、Avg Output Tokens、TTFT、TPOT、E2E（各含 Avg/P50/P90/P99） | ✅ 已实现 |
-| F-62 | 输入 / 输出 token 数均通过 tiktoken（cl100k_base）本地计数，不依赖 API 响应中的 `usage` 字段 | ✅ 已实现 |
+| F-62 | 性能吞吐指标使用本地 tiktoken（cl100k_base）计数，不依赖 API 响应中的 `usage` 字段 | ✅ 已实现 |
 | F-63 | TPOT = `(E2E - TTFT) / (输出 token 数 - 1)`；输出仅 1 token 时退化为 E2E | ✅ 已实现 |
 | F-64 | 百分位数使用最近秩（nearest-rank）方法：`idx = ceil(n × p) - 1` | ✅ 已实现 |
 | F-65 | 吞吐量统计基于整体墙钟时间（wall time），反映真实并发吞吐能力 | ✅ 已实现 |
+| F-66 | OpenAI 兼容流式 Chat Completions 默认请求 `stream_options.include_usage=true`，解析 SSE chunk 中的 `usage.prompt_tokens` / `completion_tokens` / `total_tokens` | ✅ 已实现 |
+| F-67 | Anthropic Messages 流式压测解析 SSE usage 中的 `input_tokens` / `output_tokens`，并以 input + output 作为 API total tokens | ✅ 已实现 |
 
 ### 2.8 Token 生成与离线要求
 
@@ -122,7 +125,17 @@
 | F-93 | 响应以全宽可滚动 viewport 展示，内容格式与 Response Compare 一致（响应头 + 分隔线 + JSON body） | ✅ 已实现 |
 | F-94 | 使用 vim 风格快捷键：`j/k` 逐行滚动，`ctrl+d/u` 翻半页；`esc` 返回配置界面 | ✅ 已实现 |
 
-### 2.11 结果导出
+### 2.11 Prompt Cache Hit Test
+
+| ID | 需求 | 状态 |
+|----|------|------|
+| F-100 | 提供独立的 Prompt Cache Hit Test 模式入口，仅在选择 Chat Completion 时显示 | ✅ 已实现 |
+| F-101 | 配置界面包含：API URL、API Key、Model、Custom Params、Test Count、Max Output Tokens、System Prompt、User Prompt | ✅ 已实现 |
+| F-102 | 使用用户粘贴的 User Prompt，重复发送同一非流式 Chat Completions 请求，默认每 3 秒一次 | ✅ 已实现 |
+| F-103 | 从响应 `usage.prompt_tokens_details.cached_tokens` 读取缓存命中 token，并统计累计 prompt tokens、cached tokens、overall hit rate、avg request hit rate | ✅ 已实现 |
+| F-104 | Provider 不返回 `usage` 或 `cached_tokens` 时显示 `N/A` / missing 计数，不按 0 命中处理 | ✅ 已实现 |
+
+### 2.12 结果导出
 
 | ID | 需求 | 状态 |
 |----|------|------|
@@ -143,6 +156,7 @@
 | NF-04 | 非 200 响应错误信息包含最多 512 字节的响应体，便于排查认证、限流问题 | ✅ 已实现 |
 | NF-05 | SSE 解析失败的 chunk 单独计数（SkippedChunks），不影响成功请求的指标统计 | ✅ 已实现 |
 | NF-06 | 压测逻辑（`internal/bench`）与 TUI 逻辑（`internal/tui`）完全解耦，bench 包可独立复用 | ✅ 已实现 |
+| NF-07 | 成功请求未返回 API usage 时记录 missing 计数，API token 参考值显示为 `N/A`，不按 0 处理 | ✅ 已实现 |
 
 ---
 
@@ -200,6 +214,19 @@ Provider A / B 各自独立配置：Name、URL、API Key、Model、Custom Params
 | User Message | 是 | 发送的用户消息 |
 | System Prompt | 否 | 可选 system 消息，留空跳过 |
 
+### 4.6 TUI 表单参数（Prompt Cache Hit Test 模式）
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| API URL | 是 | Chat Completions 完整 API 端点地址 |
+| API Key | 否 | Bearer Token，留空则不添加鉴权头 |
+| Model | 是 | 模型名称 |
+| Custom Params | 否 | 可选 JSON 对象，合并至请求体；可用于传入 `prompt_cache_key` 等兼容参数 |
+| Test Count | 是 | 重复请求次数，须 > 0 |
+| Max Output Tokens | 否 | 最大输出 token 数，留空则请求体不发送 `max_tokens` |
+| System Prompt | 否 | 可选 system 消息，留空跳过 |
+| User Prompt | 是 | 需要重复发送以测试缓存命中的用户 prompt |
+
 ---
 
 ## 5. 界面流程
@@ -221,6 +248,10 @@ Provider A / B 各自独立配置：Name、URL、API Key、Model、Custom Params
             │              └─ 响应头 + JSON body 全宽 viewport
             │                   ├─ [ctrl+e] 导出响应到文件
             │                   └─ [esc] 返回配置
+            ├─ Prompt Cache Hit Test（仅 Chat Completion）
+            │    └─ 配置 Provider + User Prompt
+            │         └─ 重复非流式请求
+            │              └─ 缓存命中结果展示
             └─ Response Compare（仅 Chat Completion / Anthropic Messages）
                  └─ 配置两个 Provider + 请求内容
                       └─ 左右分栏响应展示（响应头 + JSON body）
@@ -239,3 +270,4 @@ Provider A / B 各自独立配置：Name、URL、API Key、Model、Custom Params
 | v2.1 | 2026-03-25 | 新增 Response Compare 独立模式（双 Provider 响应质量对比，左右分栏 viewport）；添加 Makefile 多平台一键构建，产物子目录含 BPE 文件；启动时 BPE 文件缺失给出明确错误提示 |
 | v2.2 | 2026-03-26 | 新增 Custom Params（每 Provider 独立 JSON，合并至请求体）；新增 spinner；Completion 结果三组指标添加分隔线；统一导航快捷键（`esc` 返回，`ctrl+c` 退出） |
 | v2.3 | 2026-03-28 | 新增 Anthropic Messages API 支持（完整功能与 Chat Completion 一致）；新增 Single Response View 模式（单 Provider 非流式响应查看）；Response Compare / Single Response View 展示 HTTP 响应头；滚动快捷键改为 vim 风格（`j/k`、`ctrl+d/u`）；所有结果页支持 `ctrl+e` 导出到文本文件 |
+| v2.4 | 2026-06-11 | Completion / Anthropic Messages 结果页新增 API 原始 token 用量展示；OpenAI 兼容流式请求默认请求 usage chunk；补充错误分类、Prompt Cache Hit Test、自然 prompt 生成及相关测试说明 |

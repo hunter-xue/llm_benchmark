@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -10,13 +11,13 @@ import (
 )
 
 type resultsModel struct {
-	apiMode          string
-	testMode         string
-	embeddingReports []*bench.EmbeddingReport  // len 1 for single, 2 for PK
+	apiMode           string
+	testMode          string
+	embeddingReports  []*bench.EmbeddingReport  // len 1 for single, 2 for PK
 	completionReports []*bench.CompletionReport // len 1 for single, 2 for PK
-	providerNames    []string
-	hasErrors        bool
-	width            int
+	providerNames     []string
+	hasErrors         bool
+	width             int
 }
 
 func newResultsModel(apiMode, testMode string, providerNames []string) resultsModel {
@@ -66,6 +67,25 @@ func (m resultsModel) mergedErrorDetails() map[string]int {
 	return merged
 }
 
+func (m resultsModel) mergedErrorCategories() map[string]int {
+	merged := make(map[string]int)
+	for _, r := range m.embeddingReports {
+		if r != nil {
+			for k, v := range r.ErrorCategories {
+				merged[k] += v
+			}
+		}
+	}
+	for _, r := range m.completionReports {
+		if r != nil {
+			for k, v := range r.ErrorCategories {
+				merged[k] += v
+			}
+		}
+	}
+	return merged
+}
+
 func (m resultsModel) update(msg tea.Msg) (resultsModel, tea.Cmd) {
 	return m, nil
 }
@@ -75,10 +95,10 @@ func (m *resultsModel) setWidth(w int) {
 }
 
 type pkRow struct {
-	metric        string
-	valA          string
-	valB          string
-	winnerIdx     int  // 0=A, 1=B, -1=tie/na
+	metric         string
+	valA           string
+	valB           string
+	winnerIdx      int // 0=A, 1=B, -1=tie/na
 	higherIsBetter bool
 }
 
@@ -142,6 +162,7 @@ func (m resultsModel) renderEmbeddingSingle(sb *strings.Builder) {
 		{"Failed", fmt.Sprintf("%d", r.ErrorCount)},
 	}
 	renderTwoColTable(sb, summaryRows)
+	renderErrorCategorySummary(sb, r.ErrorCategories)
 
 	if !r.Valid {
 		sb.WriteString("\n")
@@ -235,6 +256,7 @@ func (m resultsModel) renderEmbeddingPK(sb *strings.Builder) {
 		successB = fmt.Sprintf("%d / %d", b.SuccessCount, b.TotalRequests)
 	}
 	renderPKRow(sb, "Success / Total", successA, successB, -1)
+	renderPKRow(sb, "Error Categories", summarizeErrorCategories(reportEmbeddingCategories(a)), summarizeErrorCategories(reportEmbeddingCategories(b)), -1)
 
 	for _, r := range rows {
 		va := getA(r.valA, r.fmtFn)
@@ -286,6 +308,7 @@ func (m resultsModel) renderCompletionSingle(sb *strings.Builder) {
 		{"Failed", fmt.Sprintf("%d", r.ErrorCount)},
 	}
 	renderTwoColTable(sb, summaryRows)
+	renderErrorCategorySummary(sb, r.ErrorCategories)
 
 	if !r.Valid {
 		sb.WriteString("\n")
@@ -305,6 +328,9 @@ func (m resultsModel) renderCompletionSingle(sb *strings.Builder) {
 		{"Output TPM", fmtF(r.OutputTPM, 0)},
 		{"Avg Output Tokens", fmtF(r.AvgOutputTokens, 1)},
 	})
+	sb.WriteString(dimStyle.Render("  " + strings.Repeat("─", 36)))
+	sb.WriteString("\n")
+	renderTwoColTable(sb, apiUsageRows(r))
 	sb.WriteString(dimStyle.Render("  " + strings.Repeat("─", 36)))
 	sb.WriteString("\n")
 	renderTwoColTable(sb, [][]string{
@@ -404,6 +430,12 @@ func (m resultsModel) renderCompletionPK(sb *strings.Builder) {
 		successB = fmt.Sprintf("%d / %d", b.SuccessCount, b.TotalRequests)
 	}
 	renderPKRow(sb, "Success / Total", successA, successB, -1)
+	renderPKRow(sb, "Error Categories", summarizeErrorCategories(reportCompletionCategories(a)), summarizeErrorCategories(reportCompletionCategories(b)), -1)
+	renderPKSeparator(sb)
+	renderPKRow(sb, "API Prompt Tokens", formatAPIUsageTokens(a, func(r *bench.CompletionReport) int { return r.APIPromptTokens }), formatAPIUsageTokens(b, func(r *bench.CompletionReport) int { return r.APIPromptTokens }), -1)
+	renderPKRow(sb, "API Completion Tokens", formatAPIUsageTokens(a, func(r *bench.CompletionReport) int { return r.APICompletionTokens }), formatAPIUsageTokens(b, func(r *bench.CompletionReport) int { return r.APICompletionTokens }), -1)
+	renderPKRow(sb, "API Total Tokens", formatAPIUsageTokens(a, func(r *bench.CompletionReport) int { return r.APITotalTokens }), formatAPIUsageTokens(b, func(r *bench.CompletionReport) int { return r.APITotalTokens }), -1)
+	renderPKRow(sb, "API Usage Samples", formatAPIUsageSamples(a), formatAPIUsageSamples(b), -1)
 
 	for _, r := range compRows {
 		if r.sep {
@@ -481,4 +513,83 @@ func renderTwoColTable(sb *strings.Builder, rows [][]string) {
 		label := labelStyle.Render(row[0] + ":")
 		sb.WriteString(fmt.Sprintf("  %s  %s\n", label, row[1]))
 	}
+}
+
+func apiUsageRows(r *bench.CompletionReport) [][]string {
+	rows := [][]string{
+		{"API Prompt Tokens", formatAPIUsageTokens(r, func(r *bench.CompletionReport) int { return r.APIPromptTokens })},
+		{"API Completion Tokens", formatAPIUsageTokens(r, func(r *bench.CompletionReport) int { return r.APICompletionTokens })},
+		{"API Total Tokens", formatAPIUsageTokens(r, func(r *bench.CompletionReport) int { return r.APITotalTokens })},
+		{"API Usage Samples", formatAPIUsageSamples(r)},
+	}
+	if r != nil && r.MissingAPIUsageCount > 0 {
+		rows = append(rows, []string{"Missing API Usage", fmt.Sprintf("%d", r.MissingAPIUsageCount)})
+	}
+	return rows
+}
+
+func formatAPIUsageTokens(r *bench.CompletionReport, value func(*bench.CompletionReport) int) string {
+	if r == nil || r.APIUsageCount == 0 {
+		return naStyle.Render("N/A")
+	}
+	return fmt.Sprintf("%d", value(r))
+}
+
+func formatAPIUsageSamples(r *bench.CompletionReport) string {
+	if r == nil || r.SuccessCount == 0 {
+		return naStyle.Render("N/A")
+	}
+	if r.APIUsageCount == 0 {
+		return fmt.Sprintf("%s / %d", naStyle.Render("N/A"), r.SuccessCount)
+	}
+	return fmt.Sprintf("%d / %d", r.APIUsageCount, r.SuccessCount)
+}
+
+func renderErrorCategorySummary(sb *strings.Builder, categories map[string]int) {
+	summary := summarizeErrorCategories(categories)
+	if summary == "" {
+		return
+	}
+	renderTwoColTable(sb, [][]string{{"Error Categories", summary}})
+}
+
+func summarizeErrorCategories(categories map[string]int) string {
+	if len(categories) == 0 {
+		return ""
+	}
+	type kv struct {
+		name  string
+		count int
+	}
+	pairs := make([]kv, 0, len(categories))
+	for name, count := range categories {
+		if count > 0 {
+			pairs = append(pairs, kv{name: name, count: count})
+		}
+	}
+	sort.Slice(pairs, func(i, j int) bool {
+		if pairs[i].count != pairs[j].count {
+			return pairs[i].count > pairs[j].count
+		}
+		return pairs[i].name < pairs[j].name
+	})
+	parts := make([]string, 0, len(pairs))
+	for _, p := range pairs {
+		parts = append(parts, fmt.Sprintf("%s: %d", p.name, p.count))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func reportEmbeddingCategories(r *bench.EmbeddingReport) map[string]int {
+	if r == nil {
+		return nil
+	}
+	return r.ErrorCategories
+}
+
+func reportCompletionCategories(r *bench.CompletionReport) map[string]int {
+	if r == nil {
+		return nil
+	}
+	return r.ErrorCategories
 }

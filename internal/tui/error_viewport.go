@@ -40,8 +40,8 @@ func (m *errorViewportModel) setSize(w, h int) {
 	}
 }
 
-func (m *errorViewportModel) setContent(errorDetails map[string]int) {
-	if len(errorDetails) == 0 {
+func (m *errorViewportModel) setContent(errorCategories map[string]int, errorDetails map[string]int) {
+	if len(errorCategories) == 0 && len(errorDetails) == 0 {
 		m.vp.SetContent("  No errors recorded.")
 		return
 	}
@@ -50,6 +50,27 @@ func (m *errorViewportModel) setContent(errorDetails map[string]int) {
 		msg   string
 		count int
 	}
+	var sb strings.Builder
+	if len(errorCategories) > 0 {
+		var categoryPairs []kv
+		for msg, cnt := range errorCategories {
+			categoryPairs = append(categoryPairs, kv{msg, cnt})
+		}
+		sort.Slice(categoryPairs, func(i, j int) bool {
+			if categoryPairs[i].count != categoryPairs[j].count {
+				return categoryPairs[i].count > categoryPairs[j].count
+			}
+			return categoryPairs[i].msg < categoryPairs[j].msg
+		})
+		sb.WriteString("  Error categories:\n\n")
+		for _, p := range categoryPairs {
+			sb.WriteString(fmt.Sprintf("  [%d×] %s\n", p.count, p.msg))
+		}
+		if len(errorDetails) > 0 {
+			sb.WriteString("\n")
+		}
+	}
+
 	var pairs []kv
 	for msg, cnt := range errorDetails {
 		pairs = append(pairs, kv{msg, cnt})
@@ -61,10 +82,11 @@ func (m *errorViewportModel) setContent(errorDetails map[string]int) {
 		return pairs[i].msg < pairs[j].msg
 	})
 
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("  %d distinct error type(s):\n\n", len(pairs)))
-	for _, p := range pairs {
-		sb.WriteString(fmt.Sprintf("  [%d×] %s\n", p.count, p.msg))
+	if len(pairs) > 0 {
+		sb.WriteString(fmt.Sprintf("  %d distinct error detail(s):\n\n", len(pairs)))
+		for _, p := range pairs {
+			sb.WriteString(fmt.Sprintf("  [%d×] %s\n", p.count, p.msg))
+		}
 	}
 	m.vp.SetContent(sb.String())
 }

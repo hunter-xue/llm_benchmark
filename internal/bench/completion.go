@@ -22,10 +22,21 @@ type completionMessage struct {
 }
 
 type completionRequest struct {
-	Model     string              `json:"model"`
-	Messages  []completionMessage `json:"messages"`
-	Stream    bool                `json:"stream"`
-	MaxTokens int                 `json:"max_tokens,omitempty"`
+	Model         string                `json:"model"`
+	Messages      []completionMessage   `json:"messages"`
+	Stream        bool                  `json:"stream"`
+	MaxTokens     int                   `json:"max_tokens,omitempty"`
+	StreamOptions *streamOptionsRequest `json:"stream_options,omitempty"`
+}
+
+type streamOptionsRequest struct {
+	IncludeUsage bool `json:"include_usage"`
+}
+
+type apiUsage struct {
+	PromptTokens     *int `json:"prompt_tokens"`
+	CompletionTokens *int `json:"completion_tokens"`
+	TotalTokens      *int `json:"total_tokens"`
 }
 
 type streamChunk struct {
@@ -35,6 +46,7 @@ type streamChunk struct {
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
+	Usage *apiUsage `json:"usage"`
 }
 
 type completionResult struct {
@@ -42,6 +54,10 @@ type completionResult struct {
 	E2E           time.Duration
 	InputTokens   int
 	OutputTokens  int
+	APIPrompt     int
+	APICompletion int
+	APITotal      int
+	HasAPIUsage   bool
 	SkippedChunks int
 	Err           error
 }
@@ -54,7 +70,7 @@ func RunCompletionBench(
 	testText string,
 	actualInputTokens int,
 	tkm *tiktoken.Tiktoken,
-	onProgress func(completed, errors int),
+	onProgress func(ProgressUpdate),
 ) CompletionReport {
 	results := make(chan completionResult, cfg.TotalRequests)
 
@@ -88,7 +104,12 @@ func RunCompletionBench(
 					c, e := completed, errCount
 					mu.Unlock()
 					if onProgress != nil {
-						onProgress(c, e)
+						onProgress(ProgressUpdate{
+							Completed:     c,
+							Errors:        e,
+							ErrorDetail:   ctx.Err().Error(),
+							ErrorCategory: ClassifyError(ctx.Err()),
+						})
 					}
 					continue
 				default:
@@ -105,7 +126,12 @@ func RunCompletionBench(
 				c, e := completed, errCount
 				mu.Unlock()
 				if onProgress != nil {
-					onProgress(c, e)
+					update := ProgressUpdate{Completed: c, Errors: e}
+					if res.Err != nil {
+						update.ErrorDetail = res.Err.Error()
+						update.ErrorCategory = ClassifyError(res.Err)
+					}
+					onProgress(update)
 				}
 			}
 		}()
@@ -121,20 +147,34 @@ func RunCompletionBench(
 		tpots              []float64
 		totalInToks        int
 		totalOutToks       int
+		apiPromptToks      int
+		apiCompletionToks  int
+		apiTotalToks       int
+		apiUsageCount      int
+		missingAPIUsage    int
 		totalSkippedChunks int
 		errors             int
 		errorDetails       = make(map[string]int)
+		errorCategories    = make(map[string]int)
 	)
 
 	for r := range results {
 		if r.Err != nil {
 			errors++
-			errorDetails[r.Err.Error()]++
+			recordError(errorDetails, errorCategories, r.Err)
 		} else {
 			ttfts = append(ttfts, float64(r.TTFT.Milliseconds()))
 			e2es = append(e2es, float64(r.E2E.Milliseconds()))
 			totalInToks += r.InputTokens
 			totalOutToks += r.OutputTokens
+			if r.HasAPIUsage {
+				apiPromptToks += r.APIPrompt
+				apiCompletionToks += r.APICompletion
+				apiTotalToks += r.APITotal
+				apiUsageCount++
+			} else {
+				missingAPIUsage++
+			}
 			totalSkippedChunks += r.SkippedChunks
 
 			if r.OutputTokens > 1 {
@@ -152,14 +192,20 @@ func RunCompletionBench(
 
 	successCount := len(e2es)
 	report := CompletionReport{
-		TotalRequests: cfg.TotalRequests,
-		SuccessCount:  successCount,
-		ErrorCount:    errors,
-		WallTime:      wallTime,
-		SkippedChunks: totalSkippedChunks,
-		ErrorDetails:  errorDetails,
-		Valid:         successCount > 0,
+		TotalRequests:   cfg.TotalRequests,
+		SuccessCount:    successCount,
+		ErrorCount:      errors,
+		WallTime:        wallTime,
+		SkippedChunks:   totalSkippedChunks,
+		ErrorDetails:    errorDetails,
+		ErrorCategories: errorCategories,
+		Valid:           successCount > 0,
 	}
+	report.APIPromptTokens = apiPromptToks
+	report.APICompletionTokens = apiCompletionToks
+	report.APITotalTokens = apiTotalToks
+	report.APIUsageCount = apiUsageCount
+	report.MissingAPIUsageCount = missingAPIUsage
 
 	if successCount > 0 && wallTime.Seconds() > 0 {
 		report.RPS = float64(successCount) / wallTime.Seconds()
@@ -204,9 +250,10 @@ func doCompletionRequest(
 	messages = append(messages, completionMessage{Role: "user", Content: testText})
 
 	payload := completionRequest{
-		Model:    provider.Model,
-		Messages: messages,
-		Stream:   true,
+		Model:         provider.Model,
+		Messages:      messages,
+		Stream:        true,
+		StreamOptions: &streamOptionsRequest{IncludeUsage: true},
 	}
 	if cfg.MaxOutputTokens > 0 {
 		payload.MaxTokens = cfg.MaxOutputTokens
@@ -277,6 +324,9 @@ func doCompletionRequest(
 			skippedChunks++
 			continue
 		}
+		if chunk.Usage != nil {
+			applyAPIUsage(&res, chunk.Usage)
+		}
 
 		for _, choice := range chunk.Choices {
 			content := choice.Delta.Content
@@ -313,6 +363,27 @@ func doCompletionRequest(
 	}
 	res.SkippedChunks = skippedChunks
 	return res
+}
+
+func applyAPIUsage(res *completionResult, usage *apiUsage) {
+	if usage == nil {
+		return
+	}
+	if usage.PromptTokens != nil {
+		res.APIPrompt = *usage.PromptTokens
+		res.HasAPIUsage = true
+	}
+	if usage.CompletionTokens != nil {
+		res.APICompletion = *usage.CompletionTokens
+		res.HasAPIUsage = true
+	}
+	if usage.TotalTokens != nil {
+		res.APITotal = *usage.TotalTokens
+		res.HasAPIUsage = true
+	}
+	if res.HasAPIUsage && usage.TotalTokens == nil {
+		res.APITotal = res.APIPrompt + res.APICompletion
+	}
 }
 
 // DoCompareRequest sends a single non-streaming completion request and returns

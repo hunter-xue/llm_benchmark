@@ -35,6 +35,13 @@ func (m cacheHitResultsModel) errorDetails() map[string]int {
 	return m.report.ErrorDetails
 }
 
+func (m cacheHitResultsModel) errorCategories() map[string]int {
+	if m.report == nil {
+		return nil
+	}
+	return m.report.ErrorCategories
+}
+
 func (m cacheHitResultsModel) view(width, height int) string {
 	var sb strings.Builder
 	sb.WriteString(titleStyle.Render("Prompt Cache Hit Results"))
@@ -55,6 +62,7 @@ func (m cacheHitResultsModel) view(width, height int) string {
 		{"Failed", fmt.Sprintf("%d", r.ErrorCount)},
 		{"Wall Time", fmt.Sprintf("%.2f s", r.WallTime.Seconds())},
 	})
+	renderErrorCategorySummary(&sb, r.ErrorCategories)
 
 	if !r.Valid {
 		sb.WriteString("\n")

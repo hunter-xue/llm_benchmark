@@ -22,14 +22,16 @@ type providerProgress struct {
 }
 
 type runningModel struct {
-	spinner    spinner.Model
-	providers  []providerProgress
-	doneCount  int
-	totalDone  int // how many providers completed
-	testMode   string
-	apiMode    string
-	hasErrors  bool
-	cancelFunc context.CancelFunc
+	spinner         spinner.Model
+	providers       []providerProgress
+	doneCount       int
+	totalDone       int // how many providers completed
+	testMode        string
+	apiMode         string
+	hasErrors       bool
+	cancelFunc      context.CancelFunc
+	errorDetails    map[string]int
+	errorCategories map[string]int
 
 	width int
 }
@@ -49,10 +51,12 @@ func newRunningModel(providers []bench.ProviderConfig, cfg bench.BenchConfig) ru
 	}
 
 	return runningModel{
-		spinner:   s,
-		providers: pp,
-		testMode:  cfg.Mode,
-		apiMode:   cfg.Mode,
+		spinner:         s,
+		providers:       pp,
+		testMode:        cfg.Mode,
+		apiMode:         cfg.Mode,
+		errorDetails:    make(map[string]int),
+		errorCategories: make(map[string]int),
 	}
 }
 
@@ -72,10 +76,16 @@ func startBench(
 		return func() tea.Msg {
 			errMsg := fmt.Sprintf("failed to prepare benchmark text: %v", err)
 			if cfg.Mode == bench.ModeEmbedding {
-				r := bench.EmbeddingReport{ErrorDetails: map[string]int{errMsg: 1}}
+				r := bench.EmbeddingReport{
+					ErrorDetails:    map[string]int{errMsg: 1},
+					ErrorCategories: map[string]int{bench.ErrorCategoryClient: 1},
+				}
 				return BenchDoneMsg{ProviderIndex: 0, EmbeddingReport: &r}
 			}
-			r := bench.CompletionReport{ErrorDetails: map[string]int{errMsg: 1}}
+			r := bench.CompletionReport{
+				ErrorDetails:    map[string]int{errMsg: 1},
+				ErrorCategories: map[string]int{bench.ErrorCategoryClient: 1},
+			}
 			return BenchDoneMsg{ProviderIndex: 0, CompletionReport: &r}
 		}, cancel
 	}
@@ -84,11 +94,13 @@ func startBench(
 		idx := i
 		pv := prov
 		go func() {
-			onProgress := func(completed, errors int) {
+			onProgress := func(update bench.ProgressUpdate) {
 				p.Send(ProgressMsg{
 					ProviderIndex: idx,
-					Completed:     completed,
-					TotalErrors:   errors,
+					Completed:     update.Completed,
+					TotalErrors:   update.Errors,
+					ErrorDetail:   update.ErrorDetail,
+					ErrorCategory: update.ErrorCategory,
 				})
 			}
 
@@ -168,11 +180,13 @@ func startCacheHitTest(
 ) (tea.Cmd, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
-		onProgress := func(completed, errors int) {
+		onProgress := func(update bench.ProgressUpdate) {
 			p.Send(ProgressMsg{
 				ProviderIndex: 0,
-				Completed:     completed,
-				TotalErrors:   errors,
+				Completed:     update.Completed,
+				TotalErrors:   update.Errors,
+				ErrorDetail:   update.ErrorDetail,
+				ErrorCategory: update.ErrorCategory,
 			})
 		}
 		r := bench.RunCacheHitTest(ctx, provider, cfg, userPrompt, onProgress)
@@ -182,7 +196,7 @@ func startCacheHitTest(
 }
 
 func prepareBenchText(cfg bench.BenchConfig, tkm *tiktoken.Tiktoken) (string, int, error) {
-	text, err := bench.GenerateTextByTokens(tkm, cfg.TargetTokens)
+	text, err := bench.GenerateMeaningfulTextByTokens(tkm, cfg.TargetTokens)
 	if err != nil {
 		return "", 0, err
 	}
@@ -204,6 +218,18 @@ func (m runningModel) update(msg tea.Msg) (runningModel, tea.Cmd) {
 			if msg.TotalErrors > 0 {
 				m.hasErrors = true
 			}
+		}
+		if msg.ErrorDetail != "" {
+			if m.errorDetails == nil {
+				m.errorDetails = make(map[string]int)
+			}
+			m.errorDetails[msg.ErrorDetail]++
+		}
+		if msg.ErrorCategory != "" {
+			if m.errorCategories == nil {
+				m.errorCategories = make(map[string]int)
+			}
+			m.errorCategories[msg.ErrorCategory]++
 		}
 		var cmds []tea.Cmd
 		for i := range m.providers {

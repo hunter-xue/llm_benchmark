@@ -7,6 +7,8 @@ type ProgressMsg struct {
 	ProviderIndex int // 0 for single/first provider, 1 for second provider in PK mode
 	Completed     int
 	TotalErrors   int
+	ErrorDetail   string
+	ErrorCategory string
 }
 
 // BenchDoneMsg is sent when a benchmark goroutine finishes.

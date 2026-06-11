@@ -109,6 +109,12 @@ build/
 
 ## 指标说明
 
+### 输入 Prompt 生成
+
+Embedding、Chat Completion、Anthropic Messages 压测会根据用户填写的 `Input Tokens` 自动生成输入文本。工具内置 100 个不同长度的英文句子，运行时使用 `tiktoken（cl100k_base）` 计算每句 token 数，并确定性地选择句子拼接成自然 prompt。
+
+最终输入会严格校准到用户指定的 token 数；如果句子拼接略微超过目标，会按 token 截断到目标长度。Single Response View、Response Compare、Prompt Cache Hit Test 使用用户直接输入的 prompt，不走自动生成逻辑。
+
 ### Embedding 模式
 
 | 指标 | 说明 |
@@ -120,7 +126,7 @@ build/
 
 ### Chat Completion / Anthropic Messages 模式
 
-所有指标**完全基于客户端本地时间测量**，不依赖 API 响应体中的 `usage` 字段。
+延迟与吞吐指标**完全基于客户端本地时间测量**。用于 TPOT、Output TPS / TPM、Avg Output Tokens 的输出 token 数仍通过本地 `tiktoken（cl100k_base）` 统计，保证在 Provider 不返回 `usage` 时也能计算性能指标。
 
 | 指标 | 说明 |
 |---|---|
@@ -129,8 +135,12 @@ build/
 | **E2E** | End-to-End Latency，从发送请求到收到最后一个 token 的总延迟 |
 | **Output TPS / TPM** | 输出 token 吞吐量（每秒 / 每分钟） |
 | **Avg Output Tokens** | 每次请求平均输出的 token 数 |
+| **API Prompt Tokens** | API 响应 `usage` 中输入 token 的累计值，仅统计成功且返回 usage 的请求 |
+| **API Completion Tokens** | API 响应 `usage` 中输出 token 的累计值，仅统计成功且返回 usage 的请求 |
+| **API Total Tokens** | API 响应 `usage` 中总 token 的累计值；Anthropic Messages 按 input + output 汇总 |
+| **API Usage Samples** | 成功请求中实际返回 `usage` 的次数，例如 `3 / 10` 表示 10 次成功请求里 3 次返回 usage |
 
-> 输出 token 数通过 **tiktoken（cl100k_base）本地编码**计数，不使用 API 的 `usage.completion_tokens`，在任何不返回 `usage` 的 API 实现上也能正确统计。
+> OpenAI 兼容 Chat Completions 流式请求默认附带 `stream_options: {"include_usage": true}` 以请求 usage chunk；如 Provider 不支持或不返回 `usage`，结果页会显示 `N/A` / missing 计数，不影响性能指标统计。Custom Params 仍可覆盖该字段。
 
 ### Prompt Cache Hit Test
 
@@ -146,6 +156,28 @@ build/
 
 ---
 
+## 错误处理与分类
+
+压测过程中失败请求不会计入延迟、RPS、TPS/TPM 等成功指标，但会单独计入失败数。结果页会展示错误分类摘要，按 **`e`** 可打开错误日志查看分类汇总和原始错误详情。
+
+当前错误分类包括：
+
+| 分类 | 说明 |
+|---|---|
+| `rate_limit` | HTTP 429 限流 |
+| `auth` | HTTP 401 / 403 认证或权限问题 |
+| `bad_request` | HTTP 400 请求参数问题 |
+| `server_error` | HTTP 5xx 服务端错误 |
+| `timeout` | 请求超时或 context deadline |
+| `connection` | DNS、连接失败、连接重置等网络连接问题 |
+| `empty_output` | 流式响应成功但没有收到非空 content |
+| `stream_error` | SSE 流读取失败 |
+| `parse_error` | 响应 JSON 解析失败 |
+| `client_error` | 本地请求构造、序列化等客户端错误 |
+| `other` | 未匹配到以上类型的错误 |
+
+---
+
 ## 注意事项
 
 - BPE 词表文件 `cl100k_base.tiktoken` 须在本地可访问，工具不会联网下载；文件缺失时启动报错并退出
@@ -153,4 +185,4 @@ build/
 - Anthropic Messages 模式 SSE 以 `event: message_stop` 结束，`max_tokens` 为必填字段（默认 4096）
 - Response Compare / Single Response View 使用非流式请求（`"stream": false`），响应头与 JSON body 均展示
 - 所有压测统计仅包含**成功请求**，失败请求不计入延迟分布
-- 非 200 响应的错误信息会包含服务端响应体（最多 512 字节），便于排查认证、限流问题
+- 非 200 响应的错误信息会包含服务端响应体（最多 512 字节），并按状态码归类，便于排查认证、限流问题

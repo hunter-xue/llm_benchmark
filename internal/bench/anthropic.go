@@ -20,11 +20,11 @@ const anthropicVersion = "2023-06-01"
 const anthropicDefaultMaxTokens = 4096
 
 type anthropicRequest struct {
-	Model     string               `json:"model"`
-	MaxTokens int                  `json:"max_tokens"`
-	System    string               `json:"system,omitempty"`
-	Messages  []completionMessage  `json:"messages"`
-	Stream    bool                 `json:"stream"`
+	Model     string              `json:"model"`
+	MaxTokens int                 `json:"max_tokens"`
+	System    string              `json:"system,omitempty"`
+	Messages  []completionMessage `json:"messages"`
+	Stream    bool                `json:"stream"`
 }
 
 type anthropicChunk struct {
@@ -33,6 +33,15 @@ type anthropicChunk struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	} `json:"delta"`
+	Message struct {
+		Usage *anthropicUsage `json:"usage"`
+	} `json:"message"`
+	Usage *anthropicUsage `json:"usage"`
+}
+
+type anthropicUsage struct {
+	InputTokens  *int `json:"input_tokens"`
+	OutputTokens *int `json:"output_tokens"`
 }
 
 func setAnthropicHeaders(req *http.Request, apiKey string) {
@@ -52,7 +61,7 @@ func RunAnthropicMessagesBench(
 	testText string,
 	actualInputTokens int,
 	tkm *tiktoken.Tiktoken,
-	onProgress func(completed, errors int),
+	onProgress func(ProgressUpdate),
 ) CompletionReport {
 	results := make(chan completionResult, cfg.TotalRequests)
 
@@ -86,7 +95,12 @@ func RunAnthropicMessagesBench(
 					c, e := completed, errCount
 					mu.Unlock()
 					if onProgress != nil {
-						onProgress(c, e)
+						onProgress(ProgressUpdate{
+							Completed:     c,
+							Errors:        e,
+							ErrorDetail:   ctx.Err().Error(),
+							ErrorCategory: ClassifyError(ctx.Err()),
+						})
 					}
 					continue
 				default:
@@ -103,7 +117,12 @@ func RunAnthropicMessagesBench(
 				c, e := completed, errCount
 				mu.Unlock()
 				if onProgress != nil {
-					onProgress(c, e)
+					update := ProgressUpdate{Completed: c, Errors: e}
+					if res.Err != nil {
+						update.ErrorDetail = res.Err.Error()
+						update.ErrorCategory = ClassifyError(res.Err)
+					}
+					onProgress(update)
 				}
 			}
 		}()
@@ -119,20 +138,34 @@ func RunAnthropicMessagesBench(
 		tpots              []float64
 		totalInToks        int
 		totalOutToks       int
+		apiPromptToks      int
+		apiCompletionToks  int
+		apiTotalToks       int
+		apiUsageCount      int
+		missingAPIUsage    int
 		totalSkippedChunks int
 		errors             int
 		errorDetails       = make(map[string]int)
+		errorCategories    = make(map[string]int)
 	)
 
 	for r := range results {
 		if r.Err != nil {
 			errors++
-			errorDetails[r.Err.Error()]++
+			recordError(errorDetails, errorCategories, r.Err)
 		} else {
 			ttfts = append(ttfts, float64(r.TTFT.Milliseconds()))
 			e2es = append(e2es, float64(r.E2E.Milliseconds()))
 			totalInToks += r.InputTokens
 			totalOutToks += r.OutputTokens
+			if r.HasAPIUsage {
+				apiPromptToks += r.APIPrompt
+				apiCompletionToks += r.APICompletion
+				apiTotalToks += r.APITotal
+				apiUsageCount++
+			} else {
+				missingAPIUsage++
+			}
 			totalSkippedChunks += r.SkippedChunks
 
 			if r.OutputTokens > 1 {
@@ -150,14 +183,20 @@ func RunAnthropicMessagesBench(
 
 	successCount := len(e2es)
 	report := CompletionReport{
-		TotalRequests: cfg.TotalRequests,
-		SuccessCount:  successCount,
-		ErrorCount:    errors,
-		WallTime:      wallTime,
-		SkippedChunks: totalSkippedChunks,
-		ErrorDetails:  errorDetails,
-		Valid:         successCount > 0,
+		TotalRequests:   cfg.TotalRequests,
+		SuccessCount:    successCount,
+		ErrorCount:      errors,
+		WallTime:        wallTime,
+		SkippedChunks:   totalSkippedChunks,
+		ErrorDetails:    errorDetails,
+		ErrorCategories: errorCategories,
+		Valid:           successCount > 0,
 	}
+	report.APIPromptTokens = apiPromptToks
+	report.APICompletionTokens = apiCompletionToks
+	report.APITotalTokens = apiTotalToks
+	report.APIUsageCount = apiUsageCount
+	report.MissingAPIUsageCount = missingAPIUsage
 
 	if successCount > 0 && wallTime.Seconds() > 0 {
 		report.RPS = float64(successCount) / wallTime.Seconds()
@@ -262,7 +301,7 @@ func doAnthropicRequest(
 			}
 			continue
 		}
-		if eventType != "content_block_delta" || !strings.HasPrefix(line, "data:") {
+		if !strings.HasPrefix(line, "data:") {
 			continue
 		}
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
@@ -272,6 +311,11 @@ func doAnthropicRequest(
 		var chunk anthropicChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			skippedChunks++
+			continue
+		}
+		applyAnthropicUsage(&res, chunk.Message.Usage)
+		applyAnthropicUsage(&res, chunk.Usage)
+		if eventType != "content_block_delta" {
 			continue
 		}
 		if chunk.Delta.Type == "text_delta" && chunk.Delta.Text != "" {
@@ -305,6 +349,23 @@ func doAnthropicRequest(
 	}
 	res.SkippedChunks = skippedChunks
 	return res
+}
+
+func applyAnthropicUsage(res *completionResult, usage *anthropicUsage) {
+	if usage == nil {
+		return
+	}
+	if usage.InputTokens != nil {
+		res.APIPrompt = *usage.InputTokens
+		res.HasAPIUsage = true
+	}
+	if usage.OutputTokens != nil {
+		res.APICompletion = *usage.OutputTokens
+		res.HasAPIUsage = true
+	}
+	if res.HasAPIUsage {
+		res.APITotal = res.APIPrompt + res.APICompletion
+	}
 }
 
 // DoAnthropicCompareRequest sends a single non-streaming Anthropic Messages request

@@ -113,6 +113,9 @@ func TestRunCacheHitTestRecordsErrors(t *testing.T) {
 	if len(report.ErrorDetails) != 1 {
 		t.Fatalf("error details len = %d, want 1", len(report.ErrorDetails))
 	}
+	if got := report.ErrorCategories[ErrorCategoryRateLimit]; got != 1 {
+		t.Fatalf("rate limit category count = %d, want 1", got)
+	}
 }
 
 func jsonInt(v int) string {
