@@ -2,7 +2,6 @@ package bench
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -11,11 +10,21 @@ import (
 
 func testTokenizer(t *testing.T) *tiktoken.Tiktoken {
 	t.Helper()
-	tkm, err := InitTiktoken(filepath.Join("..", "..", "cl100k_base.tiktoken"))
+	tkm, err := InitTiktoken("cl100k_base.tiktoken")
 	if err != nil {
 		t.Fatalf("InitTiktoken: %v", err)
 	}
 	return tkm
+}
+
+func TestInitTiktokenUsesEmbeddedBPEByDefault(t *testing.T) {
+	tkm, err := InitTiktoken("")
+	if err != nil {
+		t.Fatalf("InitTiktoken: %v", err)
+	}
+	if got := len(tkm.EncodeOrdinary("embedded tokenizer works")); got == 0 {
+		t.Fatal("embedded tokenizer produced no tokens")
+	}
 }
 
 func TestGenerateMeaningfulTextByTokensExactCounts(t *testing.T) {
@@ -60,6 +69,36 @@ func TestGenerateMeaningfulTextByTokensDeterministicAndVaried(t *testing.T) {
 	}
 	if lines := strings.Count(first, "\n") + 1; lines < 2 {
 		t.Fatalf("meaningful text should combine multiple sentence candidates, got %d line(s): %q", lines, first)
+	}
+}
+
+func TestBuildCyclicMeaningfulTextRepeatsCandidatesInOrder(t *testing.T) {
+	tkm := testTokenizer(t)
+
+	text, err := buildCyclicMeaningfulText(tkm, []string{"First sentence.", "Second sentence."}, 100)
+	if err != nil {
+		t.Fatalf("buildCyclicMeaningfulText: %v", err)
+	}
+	if got := len(tkm.EncodeOrdinary(text)); got != 100 {
+		t.Fatalf("token count = %d, want 100", got)
+	}
+	if !strings.HasPrefix(text, "First sentence.\nSecond sentence.\nFirst sentence.") {
+		t.Fatalf("text does not repeat candidates in order: %q", text)
+	}
+}
+
+func TestGenerateMeaningfulTextByTokensLargeTargetAvoidsSingleTokenFiller(t *testing.T) {
+	tkm := testTokenizer(t)
+
+	text, err := GenerateMeaningfulTextByTokens(tkm, 10_000)
+	if err != nil {
+		t.Fatalf("GenerateMeaningfulTextByTokens: %v", err)
+	}
+	if got := len(tkm.EncodeOrdinary(text)); got != 10_000 {
+		t.Fatalf("token count = %d, want 10000", got)
+	}
+	if strings.Count(text, " a") > 1_000 {
+		t.Fatal("large prompt degenerated into repeated single-token filler")
 	}
 }
 

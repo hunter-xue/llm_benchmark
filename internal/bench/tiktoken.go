@@ -14,10 +14,8 @@ import (
 //go:embed meaningful_sentences.txt
 var meaningfulSentencesText string
 
-type meaningfulSentence struct {
-	text   string
-	tokens int
-}
+//go:embed cl100k_base.tiktoken
+var embeddedBPE []byte
 
 type offlineOnlyBpeLoader struct {
 	fallback tiktoken.BpeLoader
@@ -39,19 +37,31 @@ func (l *offlineOnlyBpeLoader) LoadTiktokenBpe(tiktokenBpeFile string) (map[stri
 }
 
 // InitTiktoken sets up the offline BPE loader and returns a Tiktoken encoder.
+// An empty bpePath uses the BPE file embedded in the executable.
 func InitTiktoken(bpePath string) (*tiktoken.Tiktoken, error) {
-	absBpePath, err := filepath.Abs(bpePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to resolve bpe file path: %w", err)
-	}
-	if _, err := os.Stat(absBpePath); err != nil {
-		return nil, fmt.Errorf("bpe file not available: %s: %w", absBpePath, err)
+	cleanup := func() {}
+	if bpePath == "" {
+		var err error
+		bpePath, cleanup, err = writeEmbeddedBPE()
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+	} else {
+		absBpePath, err := filepath.Abs(bpePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve bpe file path: %w", err)
+		}
+		if _, err := os.Stat(absBpePath); err != nil {
+			return nil, fmt.Errorf("bpe file not available: %s: %w", absBpePath, err)
+		}
+		bpePath = absBpePath
 	}
 
 	tiktoken.SetBpeLoader(&offlineOnlyBpeLoader{
 		fallback: tiktoken.NewDefaultBpeLoader(),
 		files: map[string]string{
-			"cl100k_base.tiktoken": absBpePath,
+			"cl100k_base.tiktoken": bpePath,
 		},
 	})
 
@@ -60,6 +70,25 @@ func InitTiktoken(bpePath string) (*tiktoken.Tiktoken, error) {
 		return nil, fmt.Errorf("failed to initialize tokenizer: %w", err)
 	}
 	return tkm, nil
+}
+
+func writeEmbeddedBPE() (string, func(), error) {
+	f, err := os.CreateTemp("", "embedding-benchmark-cl100k-*.tiktoken")
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to create temporary BPE file: %w", err)
+	}
+	path := f.Name()
+	cleanup := func() { _ = os.Remove(path) }
+	if _, err := f.Write(embeddedBPE); err != nil {
+		_ = f.Close()
+		cleanup()
+		return "", nil, fmt.Errorf("failed to write embedded BPE file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("failed to close embedded BPE file: %w", err)
+	}
+	return path, cleanup, nil
 }
 
 // GenerateMeaningfulTextByTokens generates natural benchmark text with exactly count tokens.
@@ -72,24 +101,7 @@ func GenerateMeaningfulTextByTokens(tkm *tiktoken.Tiktoken, count int) (string, 
 		return GenerateTextByTokens(tkm, count)
 	}
 
-	candidates := calculateMeaningfulSentenceTokens(tkm, sentences)
-	text := buildMeaningfulText(tkm, candidates, count)
-	ids := tkm.EncodeOrdinary(text)
-	if len(ids) < count {
-		for i := 0; len(ids) < count && i < len(candidates)*2; i++ {
-			candidate := appendSentence(text, candidates[(count+i)%len(candidates)].text)
-			ids = tkm.EncodeOrdinary(candidate)
-			text = candidate
-		}
-	}
-	if len(ids) >= count {
-		text = tkm.Decode(ids[:count])
-		if len(tkm.EncodeOrdinary(text)) == count {
-			return text, nil
-		}
-	}
-
-	return GenerateTextByTokens(tkm, count)
+	return buildCyclicMeaningfulText(tkm, sentences, count)
 }
 
 // GenerateTextByTokens generates text with exactly count tokens.
@@ -164,53 +176,22 @@ func parseMeaningfulSentences() []string {
 	return sentences
 }
 
-func calculateMeaningfulSentenceTokens(tkm *tiktoken.Tiktoken, sentences []string) []meaningfulSentence {
-	candidates := make([]meaningfulSentence, 0, len(sentences))
-	for _, sentence := range sentences {
-		candidates = append(candidates, meaningfulSentence{
-			text:   sentence,
-			tokens: len(tkm.EncodeOrdinary(sentence)),
-		})
-	}
-	return candidates
-}
-
-func buildMeaningfulText(tkm *tiktoken.Tiktoken, sentences []meaningfulSentence, count int) string {
-	start := count % len(sentences)
+// buildCyclicMeaningfulText joins candidates in a deterministic order and repeats
+// the corpus when a requested benchmark prompt exceeds its length.
+func buildCyclicMeaningfulText(tkm *tiktoken.Tiktoken, sentences []string, count int) (string, error) {
 	text := ""
-	used := make([]bool, len(sentences))
-
-	for picked := 0; picked < len(sentences); picked++ {
-		bestIdx := -1
-		bestTokens := -1
-
-		for offset := 0; offset < len(sentences); offset++ {
-			idx := (start + picked + offset) % len(sentences)
-			if used[idx] {
-				continue
-			}
-			candidate := appendSentence(text, sentences[idx].text)
-			tokenCount := len(tkm.EncodeOrdinary(candidate))
-			if tokenCount <= count && tokenCount > bestTokens {
-				bestIdx = idx
-				bestTokens = tokenCount
-			}
-		}
-
-		if bestIdx == -1 {
-			break
-		}
-		text = appendSentence(text, sentences[bestIdx].text)
-		used[bestIdx] = true
-		if bestTokens == count {
-			return text
-		}
+	ids := []int(nil)
+	start := count % len(sentences)
+	for i := 0; len(ids) < count; i++ {
+		text = appendSentence(text, sentences[(start+i)%len(sentences)])
+		ids = tkm.EncodeOrdinary(text)
 	}
 
-	if text != "" {
-		return text
+	text = tkm.Decode(ids[:count])
+	if len(tkm.EncodeOrdinary(text)) != count {
+		return "", fmt.Errorf("unable to generate %d meaningful tokens", count)
 	}
-	return sentences[start].text
+	return text, nil
 }
 
 func appendSentence(text string, sentence string) string {
