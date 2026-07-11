@@ -11,7 +11,7 @@ go build -o embedding_benchmark .
 # Run (launches TUI)
 ./embedding_benchmark
 
-# Custom BPE file path
+# Optional external BPE file override
 ./embedding_benchmark --bpe-file /path/to/cl100k_base.tiktoken
 ```
 
@@ -69,7 +69,7 @@ ModeSelect -> TestModeSelect -> ConfigScreen -> RunningScreen -> ResultsScreen
 
 ### Key Design Decisions
 
-- **Token counting**: Uses `tiktoken-go` with `cl100k_base` encoding (offline only — `offlineOnlyBpeLoader` blocks network downloads). The BPE file must exist locally.
+- **Token counting**: Uses `tiktoken-go` with the embedded `cl100k_base` encoding (offline only — `offlineOnlyBpeLoader` blocks network downloads). `--bpe-file` optionally overrides the embedded BPE file.
 - **Benchmark input generation**: Main benchmark modes generate exact-length prompts from the embedded natural sentence pool. `GenerateMeaningfulTextByTokens` strictly matches `TargetTokens`; `GenerateTextByTokens` remains as a fallback.
 - **API usage reporting**: Completion reports keep local tiktoken-based performance counters and separately aggregate API-returned raw token usage fields (`APIPromptTokens`, `APICompletionTokens`, `APITotalTokens`, `APIUsageCount`, `MissingAPIUsageCount`). OpenAI-compatible streaming requests default to `stream_options.include_usage=true`; Custom Params can override it. Missing usage is shown as `N/A`, never counted as zero.
 - **Concurrency model**: Buffered `taskQueue` channel pre-filled with N tasks; `concurrency` goroutines drain it.
@@ -91,7 +91,7 @@ type CompletionReport struct { ...; APIPromptTokens, APICompletionTokens, APITot
 
 | Flag | Default | Notes |
 |------|---------|-------|
-| `--bpe-file` | `./cl100k_base.tiktoken` | Must exist locally |
+| `--bpe-file` | empty | Optional external BPE override |
 
 All other benchmark parameters (URL, key, model, concurrency, requests, tokens, etc.) are entered interactively in the TUI.
 

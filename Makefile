@@ -1,6 +1,5 @@
 APP     := embedding_benchmark
 BUILD   := build
-BPE     := cl100k_base.tiktoken
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION)"
 
@@ -9,7 +8,6 @@ define build_target
 	$(eval DIR := $(BUILD)/$(APP)-$(1)-$(2))
 	mkdir -p $(DIR)
 	GOOS=$(1) GOARCH=$(2) go build $(LDFLAGS) -o $(DIR)/$(APP)$(3) .
-	cp $(BPE) $(DIR)/$(BPE)
 endef
 
 .PHONY: all macos linux windows clean

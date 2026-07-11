@@ -19,7 +19,7 @@
 ## 依赖
 
 - Go 1.23+
-- 本地 BPE 词表文件 `cl100k_base.tiktoken`（工具不会联网下载，需提前准备）
+- 无额外运行时文件：`cl100k_base.tiktoken` 已嵌入可执行文件，工具不会联网下载
 
 ---
 
@@ -35,16 +35,14 @@ make windows  # 仅构建 Windows
 make clean    # 删除 build/ 目录
 ```
 
-每个平台独立子目录，包含可执行文件和所需的 `cl100k_base.tiktoken` 文件，解压即可运行：
+每个平台独立子目录仅包含可执行文件，解压即可离线运行：
 
 ```
 build/
 ├── embedding_benchmark-darwin-arm64/
-│   ├── embedding_benchmark
-│   └── cl100k_base.tiktoken
+│   └── embedding_benchmark
 ├── embedding_benchmark-linux-amd64/
-│   ├── embedding_benchmark
-│   └── cl100k_base.tiktoken
+│   └── embedding_benchmark
 └── ...
 ```
 
@@ -57,14 +55,14 @@ build/
 ## 运行
 
 ```bash
-# 使用默认 BPE 文件路径（与可执行文件同目录的 cl100k_base.tiktoken）
+# 使用内嵌 BPE 词表
 ./embedding_benchmark
 
-# 指定 BPE 文件路径
+# 可选：指定外部 BPE 文件覆盖内嵌词表
 ./embedding_benchmark --bpe-file /path/to/cl100k_base.tiktoken
 ```
 
-> 若 BPE 文件不存在，启动时会输出明确的错误提示和使用说明后退出。通过 Makefile 构建的发布包已将该文件包含在同一目录中，无需额外配置。
+> 默认 BPE 词表已嵌入可执行文件。仅在指定 `--bpe-file` 时，外部文件必须存在。
 
 启动后进入 TUI 界面，按提示依次选择：
 
@@ -111,7 +109,7 @@ build/
 
 ### 输入 Prompt 生成
 
-Embedding、Chat Completion、Anthropic Messages 压测会根据用户填写的 `Input Tokens` 自动生成输入文本。工具内置 100 个不同长度的英文句子，运行时使用 `tiktoken（cl100k_base）` 计算每句 token 数，并确定性地选择句子拼接成自然 prompt。
+Embedding、Chat Completion、Anthropic Messages 压测会根据用户填写的 `Input Tokens` 自动生成输入文本。工具内置大规模英文候选语料，运行时按确定性顺序拼接候选文本；目标超过语料长度时会循环使用语料，不会退化为重复单 token 填充。
 
 最终输入会严格校准到用户指定的 token 数；如果句子拼接略微超过目标，会按 token 截断到目标长度。Single Response View、Response Compare、Prompt Cache Hit Test 使用用户直接输入的 prompt，不走自动生成逻辑。
 
@@ -180,7 +178,7 @@ Embedding、Chat Completion、Anthropic Messages 压测会根据用户填写的 
 
 ## 注意事项
 
-- BPE 词表文件 `cl100k_base.tiktoken` 须在本地可访问，工具不会联网下载；文件缺失时启动报错并退出
+- 默认 BPE 词表已嵌入可执行文件，工具不会联网下载；可通过 `--bpe-file` 指定外部文件覆盖它
 - Completion / Anthropic Messages 压测使用流式输出（`"stream": true`），目标 API 须支持 SSE
 - Anthropic Messages 模式 SSE 以 `event: message_stop` 结束，`max_tokens` 为必填字段（默认 4096）
 - Response Compare / Single Response View 使用非流式请求（`"stream": false`），响应头与 JSON body 均展示

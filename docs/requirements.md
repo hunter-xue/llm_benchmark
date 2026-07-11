@@ -95,10 +95,10 @@
 
 | ID | 需求 | 状态 |
 |----|------|------|
-| F-70 | BPE 词表文件（`cl100k_base.tiktoken`）必须本地可访问，工具不得联网下载 | ✅ 已实现 |
-| F-71 | 根据目标 token 数精确生成等长测试文本，确保每次请求输入 token 数一致 | ✅ 已实现 |
-| F-72 | 通过 `--bpe-file` 参数指定 BPE 文件路径，默认为 `./cl100k_base.tiktoken` | ✅ 已实现 |
-| F-73 | 启动时若 BPE 文件不存在，输出明确错误信息（包含文件路径和使用方式提示）后退出 | ✅ 已实现 |
+| F-70 | 默认将 `cl100k_base.tiktoken` 嵌入可执行文件，工具不得联网下载，也不依赖 BPE sidecar 文件 | ✅ 已实现 |
+| F-71 | 根据目标 token 数精确生成等长测试文本，确保每次请求输入 token 数一致；大于语料长度时按确定性顺序循环语料 | ✅ 已实现 |
+| F-72 | `--bpe-file` 为可选外部 BPE 词表覆盖路径，默认使用内嵌 BPE | ✅ 已实现 |
+| F-73 | 指定外部 `--bpe-file` 但文件不可用时，启动输出明确错误信息后退出 | ✅ 已实现 |
 
 ### 2.9 Response Compare（响应质量对比）
 
@@ -150,7 +150,7 @@
 
 | ID | 需求 | 状态 |
 |----|------|------|
-| NF-01 | 跨平台支持：macOS（amd64/arm64）、Linux（amd64/arm64）、Windows（amd64/arm64）；提供 Makefile 一键构建，产物含 BPE 文件，解压即用 | ✅ 已实现 |
+| NF-01 | 跨平台支持：macOS（amd64/arm64）、Linux（amd64/arm64）、Windows（amd64/arm64）；提供 Makefile 一键构建，产物为内嵌 BPE 的单个可执行文件，解压即用 | ✅ 已实现 |
 | NF-02 | 使用 Go 标准并发模型（goroutine + channel）实现并发压测，无第三方并发框架依赖 | ✅ 已实现 |
 | NF-03 | Completion / Anthropic Messages 模式 HTTP 超时 300s，Embedding 模式 120s | ✅ 已实现 |
 | NF-04 | 非 200 响应错误信息包含最多 512 字节的响应体，便于排查认证、限流问题 | ✅ 已实现 |
@@ -166,7 +166,7 @@
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `--bpe-file` | `./cl100k_base.tiktoken` | 本地 BPE 词表文件路径 |
+| `--bpe-file` | 空 | 可选的外部 BPE 词表覆盖路径；未指定时使用内嵌 `cl100k_base` |
 
 ### 4.2 TUI 表单参数（单 Provider 压测）
 
@@ -271,3 +271,4 @@ Provider A / B 各自独立配置：Name、URL、API Key、Model、Custom Params
 | v2.2 | 2026-03-26 | 新增 Custom Params（每 Provider 独立 JSON，合并至请求体）；新增 spinner；Completion 结果三组指标添加分隔线；统一导航快捷键（`esc` 返回，`ctrl+c` 退出） |
 | v2.3 | 2026-03-28 | 新增 Anthropic Messages API 支持（完整功能与 Chat Completion 一致）；新增 Single Response View 模式（单 Provider 非流式响应查看）；Response Compare / Single Response View 展示 HTTP 响应头；滚动快捷键改为 vim 风格（`j/k`、`ctrl+d/u`）；所有结果页支持 `ctrl+e` 导出到文本文件 |
 | v2.4 | 2026-06-11 | Completion / Anthropic Messages 结果页新增 API 原始 token 用量展示；OpenAI 兼容流式请求默认请求 usage chunk；补充错误分类、Prompt Cache Hit Test、自然 prompt 生成及相关测试说明 |
+| v2.5 | 2026-07-11 | 扩展内置 benchmark 语料并支持长输入按确定性顺序循环生成，避免重复单 token 填充；将 `cl100k_base.tiktoken` 嵌入可执行文件，`--bpe-file` 改为可选外部覆盖，Makefile 构建产物不再携带 BPE sidecar 文件 |

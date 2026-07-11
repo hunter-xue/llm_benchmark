@@ -12,16 +12,8 @@ import (
 )
 
 func main() {
-	bpeFile := flag.String("bpe-file", "./cl100k_base.tiktoken", "Path to local cl100k_base.tiktoken file (required for offline token counting)")
+	bpeFile := flag.String("bpe-file", "", "Optional path to an external cl100k_base.tiktoken file")
 	flag.Parse()
-
-	if _, err := os.Stat(*bpeFile); os.IsNotExist(err) {
-		fmt.Fprintf(os.Stderr, "Error: BPE file not found: %s\n", *bpeFile)
-		fmt.Fprintf(os.Stderr, "\nThis tool requires the cl100k_base.tiktoken file for token counting.\n")
-		fmt.Fprintf(os.Stderr, "Place the file in the same directory as the binary, or specify its path:\n")
-		fmt.Fprintf(os.Stderr, "  %s --bpe-file /path/to/cl100k_base.tiktoken\n", os.Args[0])
-		os.Exit(1)
-	}
 
 	tkm, err := bench.InitTiktoken(*bpeFile)
 	if err != nil {
