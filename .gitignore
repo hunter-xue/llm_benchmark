@@ -9,3 +9,6 @@ build/
 *.test
 *.out
 vendor/
+
+# Git worktrees
+.worktrees/
