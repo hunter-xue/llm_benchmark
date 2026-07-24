@@ -52,6 +52,7 @@ type streamChunk struct {
 type completionResult struct {
 	TTFT          time.Duration
 	E2E           time.Duration
+	QueueTime     time.Duration // open-loop only: time from generation to actual send
 	InputTokens   int
 	OutputTokens  int
 	APIPrompt     int

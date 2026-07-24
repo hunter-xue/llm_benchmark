@@ -52,6 +52,10 @@ type CompletionReport struct {
 	E2Ep50               float64
 	E2Ep90               float64
 	E2Ep99               float64
+	QueueTimeAvg         float64 // open-loop only
+	QueueTimeP50         float64 // open-loop only
+	QueueTimeP90         float64 // open-loop only
+	QueueTimeP99         float64 // open-loop only
 	SkippedChunks        int
 	ErrorDetails         map[string]int
 	ErrorCategories      map[string]int
