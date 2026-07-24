@@ -35,7 +35,8 @@ type BenchConfig struct {
 
 - `LoadModel` defaults to `"closed_loop"`; zero-value behavior is identical to today
 - `RequestRate` is an `int` (requests per second)
-- `MaxInFlight` replaces `Concurrency` in open-loop mode; `Concurrency` is ignored
+- `MaxInFlight` replaces `Concurrency` in open-loop mode
+- Open-loop: `Concurrency` is ignored; closed-loop: `MaxInFlight` and `RequestRate` are ignored
 
 ## Core Scheduler — internal/bench/openloop.go
 
@@ -91,7 +92,7 @@ If queue time is negative (timer fired slightly early), clamp to 0.
 
 ### Cancellation
 
-- `ctx.Done()` in generator: stop generating new requests, drain remaining semaphore acquisitions
+- `ctx.Done()` in generator: stop generating new requests; requests already waiting on semaphore are cancelled (recorded as errors); in-flight requests continue or are cancelled via ctx propagation
 - `ctx.Done()` in `doCompletionRequest`: existing behavior (request fails with context error)
 - Waiting on semaphore with ctx: `select { case semaphore <- struct{}{}: case <-ctx.Done(): }` — request is recorded as error, does not occupy a slot
 
@@ -196,13 +197,15 @@ No changes. Progress reporting works identically for both models.
 ### startBench (internal/tui/running_screen.go)
 
 ```go
-if cfg.LoadModel == "open_loop" {
+if cfg.LoadModel == "open_loop" && cfg.Mode == bench.ModeCompletion {
     r := bench.RunOpenLoopCompletionBench(ctx, pv, cfg, testText, actualTokens, tkm, onProgress)
     p.Send(BenchDoneMsg{ProviderIndex: idx, CompletionReport: &r})
 } else {
-    // existing dispatch logic unchanged
+    // existing dispatch logic unchanged (closed-loop for all API modes)
 }
 ```
+
+Note: open-loop is only available for Chat Completion mode. The config screen hides the Load Model toggle for Embedding and Anthropic Messages modes.
 
 ## Error Handling
 
