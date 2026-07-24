@@ -15,6 +15,11 @@ const (
 	ModeAnthropicMessages = "anthropic_messages"
 )
 
+const (
+	LoadModelClosedLoop = "closed_loop"
+	LoadModelOpenLoop   = "open_loop"
+)
+
 // ProviderConfig holds the per-provider settings used in benchmarks.
 type ProviderConfig struct {
 	Name         string // display name, used in PK mode
@@ -32,6 +37,9 @@ type BenchConfig struct {
 	TargetTokens    int
 	MaxOutputTokens int    // completion only, 0 = unlimited
 	SystemPrompt    string // completion only
+	LoadModel       string // "closed_loop" (default) or "open_loop"
+	RequestRate     int    // open-loop: requests per second (Poisson rate)
+	MaxInFlight     int    // open-loop: max concurrent in-flight requests
 }
 
 // ProgressUpdate reports benchmark progress and optional per-request error details.
