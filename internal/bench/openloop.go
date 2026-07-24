@@ -27,6 +27,11 @@ func poissonInterval(rate float64) time.Duration {
 // RunOpenLoopCompletionBench runs an open-loop streaming completion benchmark.
 // Requests are generated at Poisson intervals (RequestRate req/s) and limited
 // to MaxInFlight concurrent in-flight requests via a semaphore.
+//
+// Note: the generator acquires the semaphore before launching each request,
+// so when all MaxInFlight slots are occupied the generator blocks and the
+// effective arrival rate drops below RequestRate. QueueTime measures the
+// per-request wait from generation to actual send.
 func RunOpenLoopCompletionBench(
 	ctx context.Context,
 	provider ProviderConfig,
