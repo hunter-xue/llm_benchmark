@@ -16,16 +16,18 @@ type fieldDef struct {
 	placeholder string
 	defaultVal  string
 	password    bool
+	fieldType   string // "" (textinput, default) or "toggle"
 }
 
 type configModel struct {
-	apiMode    string
-	testMode   string
-	inputs     []textinput.Model
-	fieldDefs  []fieldDef
-	focusIndex int
-	err        string
-	width      int
+	apiMode        string
+	testMode       string
+	inputs         []textinput.Model
+	fieldDefs      []fieldDef
+	focusIndex     int
+	err            string
+	width          int
+	loadModelIndex int // 0 = closed-loop, 1 = open-loop (completion only)
 }
 
 func newConfigModel(apiMode, testMode string) configModel {
@@ -33,29 +35,54 @@ func newConfigModel(apiMode, testMode string) configModel {
 		apiMode:  apiMode,
 		testMode: testMode,
 	}
-	m.fieldDefs = buildFieldDefs(apiMode, testMode)
-	m.inputs = make([]textinput.Model, len(m.fieldDefs))
-	for i, fd := range m.fieldDefs {
-		t := textinput.New()
-		t.Placeholder = fd.placeholder
-		t.SetValue(fd.defaultVal)
-		t.CharLimit = 512
-		if fd.password {
-			t.EchoMode = textinput.EchoPassword
-		}
-		m.inputs[i] = t
-	}
+	m.rebuildFields()
 	if len(m.inputs) > 0 {
 		m.inputs[0].Focus()
 	}
 	return m
 }
 
-func buildFieldDefs(apiMode, testMode string) []fieldDef {
-	isCompletion    := apiMode == "completion"
-	isAnthropicMsg  := apiMode == "anthropic_messages"
+// rebuildFields constructs fieldDefs and inputs based on the current
+// apiMode/testMode/loadModelIndex. Existing input values are preserved by
+// label (in order) so toggling the load model does not wipe user input.
+func (m *configModel) rebuildFields() {
+	oldValues := make(map[string][]string)
+	for i, fd := range m.fieldDefs {
+		oldValues[fd.label] = append(oldValues[fd.label], m.inputs[i].Value())
+	}
+
+	m.fieldDefs = buildFieldDefs(m.apiMode, m.testMode, m.loadModelIndex)
+	m.inputs = make([]textinput.Model, len(m.fieldDefs))
+	for i, fd := range m.fieldDefs {
+		t := textinput.New()
+		t.Placeholder = fd.placeholder
+		t.CharLimit = 512
+		if fd.password {
+			t.EchoMode = textinput.EchoPassword
+		}
+		val := fd.defaultVal
+		if vals := oldValues[fd.label]; len(vals) > 0 {
+			val = vals[0]
+			oldValues[fd.label] = vals[1:]
+		}
+		t.SetValue(val)
+		m.inputs[i] = t
+	}
+	// Clamp focusIndex
+	if m.focusIndex >= len(m.inputs) {
+		m.focusIndex = len(m.inputs) - 1
+	}
+	if m.focusIndex < 0 {
+		m.focusIndex = 0
+	}
+}
+
+func buildFieldDefs(apiMode, testMode string, loadModelIndex int) []fieldDef {
+	isCompletion := apiMode == "completion"
+	isAnthropicMsg := apiMode == "anthropic_messages"
 	isCompletionLike := isCompletion || isAnthropicMsg
 	isPK := testMode == "pk"
+	isOpenLoop := isCompletion && loadModelIndex == 1
 
 	customParamsPlaceholder := `optional JSON, e.g. {"temperature":0.7}`
 
@@ -63,6 +90,17 @@ func buildFieldDefs(apiMode, testMode string) []fieldDef {
 	if isAnthropicMsg {
 		maxTokPlaceholder = "e.g. 4096  (0 → defaults to 4096)"
 	}
+
+	// Load Model toggle field (only for completion mode)
+	loadModelField := fieldDef{
+		label:     "Load Model",
+		fieldType: "toggle",
+	}
+
+	// Concurrency fields for closed-loop vs open-loop
+	concurrencyField := fieldDef{label: "Concurrency", placeholder: "e.g. 10"}
+	maxInFlightField := fieldDef{label: "Max In-Flight", placeholder: "equivalent to Concurrency, e.g. 10"}
+	requestRateField := fieldDef{label: "Request Rate", placeholder: "requests per second, e.g. 10"}
 
 	if isPK {
 		urlPlaceholderA := "https://api.openai.com/v1/embeddings"
@@ -93,10 +131,21 @@ func buildFieldDefs(apiMode, testMode string) []fieldDef {
 			{label: "Provider B API Key", placeholder: keyPlaceholder, password: true},
 			{label: "Provider B Model", placeholder: modelPlaceholderB},
 			{label: "Custom Params", placeholder: customParamsPlaceholder},
-			{label: "Concurrency", placeholder: "e.g. 10"},
-			{label: "Total Requests", placeholder: "e.g. 100"},
-			{label: "Input Tokens", placeholder: "e.g. 500"},
 		}
+		// Add Load Model toggle for completion mode
+		if isCompletion {
+			defs = append(defs, loadModelField)
+		}
+		// Add concurrency fields based on load model
+		if isOpenLoop {
+			defs = append(defs, maxInFlightField, requestRateField)
+		} else {
+			defs = append(defs, concurrencyField)
+		}
+		defs = append(defs,
+			fieldDef{label: "Total Requests", placeholder: "e.g. 100"},
+			fieldDef{label: "Input Tokens", placeholder: "e.g. 500"},
+		)
 		if isCompletionLike {
 			defs = append(defs,
 				fieldDef{label: "Max Output Tokens", placeholder: maxTokPlaceholder},
@@ -123,10 +172,21 @@ func buildFieldDefs(apiMode, testMode string) []fieldDef {
 		{label: "API Key", placeholder: keyPlaceholder, password: true},
 		{label: "Model", placeholder: modelPlaceholder},
 		{label: "Custom Params", placeholder: customParamsPlaceholder},
-		{label: "Concurrency", placeholder: "e.g. 10"},
-		{label: "Total Requests", placeholder: "e.g. 100"},
-		{label: "Input Tokens", placeholder: "e.g. 500"},
 	}
+	// Add Load Model toggle for completion mode
+	if isCompletion {
+		defs = append(defs, loadModelField)
+	}
+	// Add concurrency fields based on load model
+	if isOpenLoop {
+		defs = append(defs, maxInFlightField, requestRateField)
+	} else {
+		defs = append(defs, concurrencyField)
+	}
+	defs = append(defs,
+		fieldDef{label: "Total Requests", placeholder: "e.g. 100"},
+		fieldDef{label: "Input Tokens", placeholder: "e.g. 500"},
+	)
 	if isCompletionLike {
 		defs = append(defs,
 			fieldDef{label: "Max Output Tokens", placeholder: maxTokPlaceholder},
@@ -138,6 +198,23 @@ func buildFieldDefs(apiMode, testMode string) []fieldDef {
 
 func (m *configModel) setWidth(w int) {
 	m.width = w
+}
+
+// isToggleField returns true if the currently focused field is a toggle.
+func (m configModel) isToggleField() bool {
+	if m.focusIndex < 0 || m.focusIndex >= len(m.fieldDefs) {
+		return false
+	}
+	return m.fieldDefs[m.focusIndex].fieldType == "toggle"
+}
+
+// toggleLoadModel switches between closed-loop and open-loop, rebuilding fields.
+func (m *configModel) toggleLoadModel() {
+	if m.apiMode != bench.ModeCompletion {
+		return // only completion mode supports open-loop
+	}
+	m.loadModelIndex = 1 - m.loadModelIndex // toggle 0↔1
+	m.rebuildFields()
 }
 
 func (m configModel) update(msg tea.Msg) (configModel, tea.Cmd) {
@@ -152,13 +229,21 @@ func (m configModel) update(msg tea.Msg) (configModel, tea.Cmd) {
 			m.inputs[m.focusIndex].Blur()
 			m.focusIndex = (m.focusIndex - 1 + len(m.inputs)) % len(m.inputs)
 			return m, m.inputs[m.focusIndex].Focus()
+		case "left", "right":
+			if m.isToggleField() {
+				m.toggleLoadModel()
+				return m, nil
+			}
 		}
 	}
 
-	// Delegate to focused input
-	var cmd tea.Cmd
-	m.inputs[m.focusIndex], cmd = m.inputs[m.focusIndex].Update(msg)
-	return m, cmd
+	// Delegate to focused input (toggle fields have no textinput to update)
+	if !m.isToggleField() {
+		var cmd tea.Cmd
+		m.inputs[m.focusIndex], cmd = m.inputs[m.focusIndex].Update(msg)
+		return m, cmd
+	}
+	return m, nil
 }
 
 // validate returns (providers, cfg, err) if valid.
@@ -168,10 +253,11 @@ func (m configModel) validate() ([]bench.ProviderConfig, bench.BenchConfig, erro
 		vals[i] = strings.TrimSpace(inp.Value())
 	}
 
-	isPK            := m.testMode == "pk"
-	isCompletion    := m.apiMode == "completion"
-	isAnthropicMsg  := m.apiMode == "anthropic_messages"
+	isPK := m.testMode == "pk"
+	isCompletion := m.apiMode == "completion"
+	isAnthropicMsg := m.apiMode == "anthropic_messages"
 	isCompletionLike := isCompletion || isAnthropicMsg
+	isOpenLoop := isCompletion && m.loadModelIndex == 1
 
 	parseInt := func(s, name string) (int, error) {
 		v, err := strconv.Atoi(s)
@@ -181,102 +267,181 @@ func (m configModel) validate() ([]bench.ProviderConfig, bench.BenchConfig, erro
 		return v, nil
 	}
 
+	// fieldIdx finds a field index by label since positions shift based on
+	// the load model. Returns the first match.
+	fieldIdx := func(label string) int {
+		for i, fd := range m.fieldDefs {
+			if fd.label == label {
+				return i
+			}
+		}
+		return -1
+	}
+
 	if isPK {
-		// indices: A=0-4, B=5-9, shared=10+
-		urlA, err := bench.NormalizeURL(vals[1])
+		urlAIdx := fieldIdx("Provider A URL")
+		modelAIdx := fieldIdx("Provider A Model")
+		customAIdx := fieldIdx("Custom Params") // first Custom Params (Provider A)
+		urlBIdx := fieldIdx("Provider B URL")
+		modelBIdx := fieldIdx("Provider B Model")
+		// Second Custom Params belongs to Provider B
+		customBIdx := -1
+		for i, fd := range m.fieldDefs {
+			if fd.label == "Custom Params" && i > customAIdx {
+				customBIdx = i
+				break
+			}
+		}
+
+		urlA, err := bench.NormalizeURL(vals[urlAIdx])
 		if err != nil {
 			return nil, bench.BenchConfig{}, fmt.Errorf("Provider A URL: %w", err)
 		}
-		if vals[3] == "" {
+		if vals[modelAIdx] == "" {
 			return nil, bench.BenchConfig{}, fmt.Errorf("Provider A Model is required")
 		}
-		if _, err := validateCustomParams(vals[4], "Provider A"); err != nil {
+		if _, err := validateCustomParams(vals[customAIdx], "Provider A"); err != nil {
 			return nil, bench.BenchConfig{}, err
 		}
-		urlB, err := bench.NormalizeURL(vals[6])
+		urlB, err := bench.NormalizeURL(vals[urlBIdx])
 		if err != nil {
 			return nil, bench.BenchConfig{}, fmt.Errorf("Provider B URL: %w", err)
 		}
-		if vals[8] == "" {
+		if vals[modelBIdx] == "" {
 			return nil, bench.BenchConfig{}, fmt.Errorf("Provider B Model is required")
 		}
-		if _, err := validateCustomParams(vals[9], "Provider B"); err != nil {
+		if _, err := validateCustomParams(vals[customBIdx], "Provider B"); err != nil {
 			return nil, bench.BenchConfig{}, err
 		}
-		c, err := parseInt(vals[10], "Concurrency")
+
+		var c, rate int
+		if isOpenLoop {
+			c, err = parseInt(vals[fieldIdx("Max In-Flight")], "Max In-Flight")
+			if err != nil {
+				return nil, bench.BenchConfig{}, err
+			}
+			rate, err = parseInt(vals[fieldIdx("Request Rate")], "Request Rate")
+			if err != nil {
+				return nil, bench.BenchConfig{}, err
+			}
+		} else {
+			c, err = parseInt(vals[fieldIdx("Concurrency")], "Concurrency")
+			if err != nil {
+				return nil, bench.BenchConfig{}, err
+			}
+		}
+
+		n, err := parseInt(vals[fieldIdx("Total Requests")], "Total Requests")
 		if err != nil {
 			return nil, bench.BenchConfig{}, err
 		}
-		n, err := parseInt(vals[11], "Total Requests")
-		if err != nil {
-			return nil, bench.BenchConfig{}, err
-		}
-		tokens, err := parseInt(vals[12], "Input Tokens")
+		tokens, err := parseInt(vals[fieldIdx("Input Tokens")], "Input Tokens")
 		if err != nil {
 			return nil, bench.BenchConfig{}, err
 		}
 
 		mode := bench.ModeEmbedding
-		if isCompletion   { mode = bench.ModeCompletion }
-		if isAnthropicMsg { mode = bench.ModeAnthropicMessages }
+		if isCompletion {
+			mode = bench.ModeCompletion
+		}
+		if isAnthropicMsg {
+			mode = bench.ModeAnthropicMessages
+		}
 		cfg := bench.BenchConfig{
 			Mode:          mode,
 			Concurrency:   c,
 			TotalRequests: n,
 			TargetTokens:  tokens,
 		}
+		if isOpenLoop {
+			cfg.LoadModel = bench.LoadModelOpenLoop
+			cfg.MaxInFlight = c
+			cfg.RequestRate = rate
+		} else {
+			cfg.LoadModel = bench.LoadModelClosedLoop
+		}
 		if isCompletionLike {
-			maxTok, _ := strconv.Atoi(vals[13])
+			maxTok, _ := strconv.Atoi(vals[fieldIdx("Max Output Tokens")])
 			cfg.MaxOutputTokens = maxTok
-			cfg.SystemPrompt = vals[14]
+			cfg.SystemPrompt = vals[fieldIdx("System Prompt")]
 		}
 		providers := []bench.ProviderConfig{
-			{Name: vals[0], URL: urlA, APIKey: vals[2], Model: vals[3], CustomParams: vals[4]},
-			{Name: vals[5], URL: urlB, APIKey: vals[7], Model: vals[8], CustomParams: vals[9]},
+			{Name: vals[fieldIdx("Provider A Name")], URL: urlA, APIKey: vals[fieldIdx("Provider A API Key")], Model: vals[modelAIdx], CustomParams: vals[customAIdx]},
+			{Name: vals[fieldIdx("Provider B Name")], URL: urlB, APIKey: vals[fieldIdx("Provider B API Key")], Model: vals[modelBIdx], CustomParams: vals[customBIdx]},
 		}
 		return providers, cfg, nil
 	}
 
-	// Single provider — indices: 0=URL, 1=Key, 2=Model, 3=CustomParams, 4=Concurrency, ...
-	apiURL, err := bench.NormalizeURL(vals[0])
+	// Single provider — find indices by label
+	urlIdx := fieldIdx("API URL")
+	keyIdx := fieldIdx("API Key")
+	modelIdx := fieldIdx("Model")
+	customIdx := fieldIdx("Custom Params")
+
+	apiURL, err := bench.NormalizeURL(vals[urlIdx])
 	if err != nil {
 		return nil, bench.BenchConfig{}, fmt.Errorf("API URL: %w", err)
 	}
-	if vals[2] == "" {
+	if vals[modelIdx] == "" {
 		return nil, bench.BenchConfig{}, fmt.Errorf("Model is required")
 	}
-	if _, err := validateCustomParams(vals[3], "Custom Params"); err != nil {
+	if _, err := validateCustomParams(vals[customIdx], "Custom Params"); err != nil {
 		return nil, bench.BenchConfig{}, err
 	}
-	c, err := parseInt(vals[4], "Concurrency")
+
+	var c, rate int
+	if isOpenLoop {
+		c, err = parseInt(vals[fieldIdx("Max In-Flight")], "Max In-Flight")
+		if err != nil {
+			return nil, bench.BenchConfig{}, err
+		}
+		rate, err = parseInt(vals[fieldIdx("Request Rate")], "Request Rate")
+		if err != nil {
+			return nil, bench.BenchConfig{}, err
+		}
+	} else {
+		c, err = parseInt(vals[fieldIdx("Concurrency")], "Concurrency")
+		if err != nil {
+			return nil, bench.BenchConfig{}, err
+		}
+	}
+
+	n, err := parseInt(vals[fieldIdx("Total Requests")], "Total Requests")
 	if err != nil {
 		return nil, bench.BenchConfig{}, err
 	}
-	n, err := parseInt(vals[5], "Total Requests")
-	if err != nil {
-		return nil, bench.BenchConfig{}, err
-	}
-	tokens, err := parseInt(vals[6], "Input Tokens")
+	tokens, err := parseInt(vals[fieldIdx("Input Tokens")], "Input Tokens")
 	if err != nil {
 		return nil, bench.BenchConfig{}, err
 	}
 
 	mode := bench.ModeEmbedding
-	if isCompletion   { mode = bench.ModeCompletion }
-	if isAnthropicMsg { mode = bench.ModeAnthropicMessages }
+	if isCompletion {
+		mode = bench.ModeCompletion
+	}
+	if isAnthropicMsg {
+		mode = bench.ModeAnthropicMessages
+	}
 	cfg := bench.BenchConfig{
 		Mode:          mode,
 		Concurrency:   c,
 		TotalRequests: n,
 		TargetTokens:  tokens,
 	}
+	if isOpenLoop {
+		cfg.LoadModel = bench.LoadModelOpenLoop
+		cfg.MaxInFlight = c
+		cfg.RequestRate = rate
+	} else {
+		cfg.LoadModel = bench.LoadModelClosedLoop
+	}
 	if isCompletionLike {
-		maxTok, _ := strconv.Atoi(vals[7])
+		maxTok, _ := strconv.Atoi(vals[fieldIdx("Max Output Tokens")])
 		cfg.MaxOutputTokens = maxTok
-		cfg.SystemPrompt = vals[8]
+		cfg.SystemPrompt = vals[fieldIdx("System Prompt")]
 	}
 	providers := []bench.ProviderConfig{
-		{Name: "Provider", URL: apiURL, APIKey: vals[1], Model: vals[2], CustomParams: vals[3]},
+		{Name: "Provider", URL: apiURL, APIKey: vals[keyIdx], Model: vals[modelIdx], CustomParams: vals[customIdx]},
 	}
 	return providers, cfg, nil
 }
@@ -309,13 +474,18 @@ func (m configModel) view(width, height int) string {
 		}
 		for end := i + count; i < end && i < len(m.inputs); i++ {
 			label := labelStyle.Render(m.fieldDefs[i].label + ":")
-			inp := m.inputs[i].View()
 			focused := i == m.focusIndex
 			cursor := "  "
 			if focused {
 				cursor = "> "
 			}
-			sb.WriteString(fmt.Sprintf("%s%s  %s\n", cursor, label, inp))
+			if m.fieldDefs[i].fieldType == "toggle" {
+				toggle := renderLoadModelToggle(m.loadModelIndex)
+				sb.WriteString(fmt.Sprintf("%s%s  %s\n", cursor, label, toggle))
+			} else {
+				inp := m.inputs[i].View()
+				sb.WriteString(fmt.Sprintf("%s%s  %s\n", cursor, label, inp))
+			}
 		}
 	}
 
@@ -335,6 +505,18 @@ func (m configModel) view(width, height int) string {
 	}
 
 	sb.WriteString("\n")
-	sb.WriteString(helpStyle.Render("tab/shift+tab navigate  •  ctrl+s start benchmark  •  esc back  •  ctrl+c quit"))
+	help := "tab/shift+tab navigate  •  ctrl+s start benchmark  •  esc back  •  ctrl+c quit"
+	if m.isToggleField() {
+		help = "←/→ toggle  •  " + help
+	}
+	sb.WriteString(helpStyle.Render(help))
 	return sb.String()
+}
+
+// renderLoadModelToggle renders the radio buttons for load model selection.
+func renderLoadModelToggle(loadModelIndex int) string {
+	if loadModelIndex == 0 {
+		return "(●) closed-loop  ( ) open-loop"
+	}
+	return "( ) closed-loop  (●) open-loop"
 }
