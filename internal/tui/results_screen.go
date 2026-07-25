@@ -431,7 +431,7 @@ func (m resultsModel) renderCompletionPK(sb *strings.Builder) {
 			{"E2E P99", a.E2Ep99, b.E2Ep99, fmtMs, false, false},
 		}
 		// Add Queue Time rows only if at least one provider has queue time data
-		if a.QueueTimeAvg > 0 || b.QueueTimeAvg > 0 || a.QueueTimeP50 > 0 || b.QueueTimeP50 > 0 {
+		if a.QueueTimeAvg > 0 || b.QueueTimeAvg > 0 {
 			compRows = append(compRows,
 				row{"", 0, 0, nil, false, true},
 				row{"Queue Time Avg", a.QueueTimeAvg, b.QueueTimeAvg, fmtMs, false, false},
