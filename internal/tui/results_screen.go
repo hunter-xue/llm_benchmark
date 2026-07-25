@@ -360,6 +360,18 @@ func (m resultsModel) renderCompletionSingle(sb *strings.Builder) {
 	}
 	renderTwoColTable(sb, e2eRows)
 
+	// Queue Time section (open-loop only)
+	if r.QueueTimeAvg > 0 || r.QueueTimeP50 > 0 || r.QueueTimeP90 > 0 || r.QueueTimeP99 > 0 {
+		sb.WriteString(dimStyle.Render("  " + strings.Repeat("─", 36)))
+		sb.WriteString("\n")
+		renderTwoColTable(sb, [][]string{
+			{"Queue Time Avg", fmtMs(r.QueueTimeAvg)},
+			{"Queue Time P50", fmtMs(r.QueueTimeP50)},
+			{"Queue Time P90", fmtMs(r.QueueTimeP90)},
+			{"Queue Time P99", fmtMs(r.QueueTimeP99)},
+		})
+	}
+
 	if r.ErrorCount > 0 {
 		sb.WriteString("\n")
 		sb.WriteString(errorStyle.Render(fmt.Sprintf("  %d request(s) failed.", r.ErrorCount)))
@@ -417,6 +429,16 @@ func (m resultsModel) renderCompletionPK(sb *strings.Builder) {
 			{"E2E P50", a.E2Ep50, b.E2Ep50, fmtMs, false, false},
 			{"E2E P90", a.E2Ep90, b.E2Ep90, fmtMs, false, false},
 			{"E2E P99", a.E2Ep99, b.E2Ep99, fmtMs, false, false},
+		}
+		// Add Queue Time rows only if at least one provider has queue time data
+		if a.QueueTimeAvg > 0 || b.QueueTimeAvg > 0 || a.QueueTimeP50 > 0 || b.QueueTimeP50 > 0 {
+			compRows = append(compRows,
+				row{"", 0, 0, nil, false, true},
+				row{"Queue Time Avg", a.QueueTimeAvg, b.QueueTimeAvg, fmtMs, false, false},
+				row{"Queue Time P50", a.QueueTimeP50, b.QueueTimeP50, fmtMs, false, false},
+				row{"Queue Time P90", a.QueueTimeP90, b.QueueTimeP90, fmtMs, false, false},
+				row{"Queue Time P99", a.QueueTimeP99, b.QueueTimeP99, fmtMs, false, false},
+			)
 		}
 	}
 

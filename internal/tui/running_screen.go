@@ -110,6 +110,9 @@ func startBench(
 			} else if cfg.Mode == bench.ModeAnthropicMessages {
 				r := bench.RunAnthropicMessagesBench(ctx, pv, cfg, testText, actualTokens, tkm, onProgress)
 				p.Send(BenchDoneMsg{ProviderIndex: idx, CompletionReport: &r})
+			} else if cfg.LoadModel == bench.LoadModelOpenLoop {
+				r := bench.RunOpenLoopCompletionBench(ctx, pv, cfg, testText, actualTokens, tkm, onProgress)
+				p.Send(BenchDoneMsg{ProviderIndex: idx, CompletionReport: &r})
 			} else {
 				r := bench.RunCompletionBench(ctx, pv, cfg, testText, actualTokens, tkm, onProgress)
 				p.Send(BenchDoneMsg{ProviderIndex: idx, CompletionReport: &r})
