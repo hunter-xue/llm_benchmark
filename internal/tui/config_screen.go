@@ -268,14 +268,16 @@ func (m configModel) validate() ([]bench.ProviderConfig, bench.BenchConfig, erro
 	}
 
 	// fieldIdx finds a field index by label since positions shift based on
-	// the load model. Returns the first match.
+	// the load model. Returns the first match. Panics on missing label to
+	// surface programming errors immediately rather than crashing with an
+	// index-out-of-range at an unrelated line.
 	fieldIdx := func(label string) int {
 		for i, fd := range m.fieldDefs {
 			if fd.label == label {
 				return i
 			}
 		}
-		return -1
+		panic(fmt.Sprintf("field %q not found in fieldDefs", label))
 	}
 
 	if isPK {

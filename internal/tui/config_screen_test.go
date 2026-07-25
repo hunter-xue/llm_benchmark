@@ -279,6 +279,53 @@ func TestValidate_OpenLoopPKMode(t *testing.T) {
 	}
 }
 
+func TestValidate_PKCustomParamsRouting(t *testing.T) {
+	m := newConfigModel(bench.ModeCompletion, "pk")
+
+	// Set different Custom Params for A and B
+	setInputsByLabel(&m, map[string]string{
+		"Provider A URL":   "https://api.openai.com/v1/chat/completions",
+		"Provider A Model": "gpt-4o-mini",
+		"Provider B URL":   "https://api.openai.com/v1/chat/completions",
+		"Provider B Model": "gpt-4o",
+		"Concurrency":      "10",
+		"Total Requests":   "10",
+		"Input Tokens":     "100",
+	})
+
+	// Set Custom Params manually by index (since labels are duplicated)
+	customAIdx := -1
+	customBIdx := -1
+	for i, fd := range m.fieldDefs {
+		if fd.label == "Custom Params" {
+			if customAIdx == -1 {
+				customAIdx = i
+			} else {
+				customBIdx = i
+			}
+		}
+	}
+	if customAIdx == -1 || customBIdx == -1 {
+		t.Fatal("expected two Custom Params fields in PK mode")
+	}
+	m.inputs[customAIdx].SetValue(`{"temperature":0.7}`)
+	m.inputs[customBIdx].SetValue(`{"top_p":0.9}`)
+
+	providers, _, err := m.validate()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(providers) != 2 {
+		t.Fatalf("expected 2 providers, got %d", len(providers))
+	}
+	if providers[0].CustomParams != `{"temperature":0.7}` {
+		t.Errorf("Provider A CustomParams = %q, want %q", providers[0].CustomParams, `{"temperature":0.7}`)
+	}
+	if providers[1].CustomParams != `{"top_p":0.9}` {
+		t.Errorf("Provider B CustomParams = %q, want %q", providers[1].CustomParams, `{"top_p":0.9}`)
+	}
+}
+
 func TestToggleLoadModel(t *testing.T) {
 	m := newConfigModel(bench.ModeCompletion, "single")
 	if m.loadModelIndex != 0 {
