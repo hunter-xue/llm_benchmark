@@ -32,6 +32,7 @@ internal/
     stats.go                    -- percentile, average, EmbeddingReport, CompletionReport structs
     embedding.go                -- RunEmbeddingBench (concurrent, returns report)
     completion.go               -- RunCompletionBench + doCompletionRequest (streaming SSE)
+    openloop.go                 -- RunOpenLoopCompletionBench (Poisson arrival + semaphore concurrency)
   tui/
     app.go                      -- Root Model, screen state machine, global prog var
     styles.go                   -- lipgloss style constants
@@ -72,7 +73,9 @@ ModeSelect -> TestModeSelect -> ConfigScreen -> RunningScreen -> ResultsScreen
 - **Token counting**: Uses `tiktoken-go` with the embedded `cl100k_base` encoding (offline only — `offlineOnlyBpeLoader` blocks network downloads). `--bpe-file` optionally overrides the embedded BPE file.
 - **Benchmark input generation**: Main benchmark modes generate exact-length prompts from the embedded natural sentence pool. `GenerateMeaningfulTextByTokens` strictly matches `TargetTokens`; `GenerateTextByTokens` remains as a fallback.
 - **API usage reporting**: Completion reports keep local tiktoken-based performance counters and separately aggregate API-returned raw token usage fields (`APIPromptTokens`, `APICompletionTokens`, `APITotalTokens`, `APIUsageCount`, `MissingAPIUsageCount`). OpenAI-compatible streaming requests default to `stream_options.include_usage=true`; Custom Params can override it. Missing usage is shown as `N/A`, never counted as zero.
-- **Concurrency model**: Buffered `taskQueue` channel pre-filled with N tasks; `concurrency` goroutines drain it.
+- **Concurrency model**: Two modes selectable via Load Model toggle in config screen (Chat Completion only):
+  - **Closed-loop** (default): Buffered `taskQueue` channel pre-filled with N tasks; `concurrency` goroutines drain it.
+  - **Open-loop**: Generator goroutine produces requests at Poisson intervals (`Request Rate` req/s); semaphore limits max in-flight requests (`Max In-Flight`). Queue time measured per request.
 - **Progress reporting**: Benchmark goroutines call `prog.Send(ProgressMsg{...})` where `prog` is a package-level `*tea.Program` set before `p.Run()`.
 - **Error log**: Raw errors are collected in `ErrorDetails map[string]int`; stable categories are counted in `ErrorCategories map[string]int`. Press `e` during/after benchmark to view category summaries plus raw details in a scrollable viewport overlay.
 
@@ -80,7 +83,13 @@ ModeSelect -> TestModeSelect -> ConfigScreen -> RunningScreen -> ResultsScreen
 
 ```go
 type ProviderConfig struct { Name, URL, APIKey, Model string }
-type BenchConfig struct { Mode, Concurrency, TotalRequests, TargetTokens, MaxOutputTokens int; SystemPrompt string }
+type BenchConfig struct {
+    Mode, Concurrency, TotalRequests, TargetTokens, MaxOutputTokens int
+    SystemPrompt string
+    LoadModel string        // "closed_loop" (default) or "open_loop"
+    RequestRate int         // open-loop: requests per second
+    MaxInFlight int         // open-loop: max concurrent in-flight
+}
 type EmbeddingReport struct { ...; ErrorDetails, ErrorCategories map[string]int; Valid bool }
 type CompletionReport struct { ...; APIPromptTokens, APICompletionTokens, APITotalTokens, APIUsageCount, MissingAPIUsageCount int; ErrorDetails, ErrorCategories map[string]int; Valid bool }
 ```
