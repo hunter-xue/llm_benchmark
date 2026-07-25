@@ -105,6 +105,54 @@ build/
 
 ---
 
+## 并发模型（Load Model）
+
+Chat Completion 模式支持两种并发模型，通过配置界面的 **Load Model** 单选切换。Embedding 和 Anthropic Messages 模式仅支持 Closed-loop。
+
+### Closed-loop（闭环，默认）
+
+固定数量的 worker 持续消费任务队列。每个 worker 发送请求 → 等待响应 → 立即发送下一个请求。
+
+- **Concurrency**：同时工作的客户端 worker 数
+- 请求发送速率受服务端延迟影响：服务端越快，客户端发送越快；服务端越慢，发送自然下降
+- 实际吞吐 ≈ `Concurrency / 平均请求延迟`
+- 适合测试**固定客户端并发下的吞吐与延迟**
+
+```
+示例：Concurrency = 10，平均延迟 = 2s
+→ 大约维持 10 个请求在途，理论吞吐 ≈ 5 req/s
+```
+
+### Open-loop（开环，SGLang 风格）
+
+请求生成器按 Poisson 分布以固定速率产生请求，semaphore 限制最大在途请求数。请求到达率与服务端响应速度解耦。
+
+- **Request Rate**：请求到达速率（req/s），间隔服从指数分布
+- **Max In-Flight**：最大同时在途请求数（相当于 closed-loop 的 Concurrency）
+- 当请求到达率超过服务端处理能力时，超出部分在 semaphore 前排队等待，产生 **Queue Time**
+- 适合模拟**真实流量、观察排队行为、测量过载表现**
+
+```
+示例：Request Rate = 20 req/s，Max In-Flight = 8
+→ 每秒约产生 20 个请求，但最多 8 个同时执行
+→ 若服务端只能处理 5 req/s，请求排队，Queue Time 增长
+```
+
+### 两种模型的核心区别
+
+| 维度 | Closed-loop | Open-loop |
+|------|-------------|-----------|
+| 并发控制 | 固定 worker 数 | Semaphore 限制最大在途数 |
+| 请求速率 | 受服务端延迟影响（自适应） | 独立可控（Request Rate） |
+| 到达模式 | 上一个完成 → 立即发下一个 | Poisson 分布间隔 |
+| 排队行为 | 无排队（worker 阻塞在请求上） | 有排队（semaphore 满时等待） |
+| Queue Time | 无 | 有（Avg/P50/P90/P99） |
+| 典型用途 | 固定并发吞吐测试 | 真实流量模拟、过载测试 |
+
+> **注意**：Open-loop 的 generator 在 semaphore 满时会阻塞，因此当服务端处理不过来时，实际到达率会低于设定的 Request Rate。Queue Time 指标反映的是每个请求从"生成"到"实际发出"的等待时间。
+
+---
+
 ## 指标说明
 
 ### 输入 Prompt 生成
@@ -137,6 +185,7 @@ Embedding、Chat Completion、Anthropic Messages 压测会根据用户填写的 
 | **API Completion Tokens** | API 响应 `usage` 中输出 token 的累计值，仅统计成功且返回 usage 的请求 |
 | **API Total Tokens** | API 响应 `usage` 中总 token 的累计值；Anthropic Messages 按 input + output 汇总 |
 | **API Usage Samples** | 成功请求中实际返回 `usage` 的次数，例如 `3 / 10` 表示 10 次成功请求里 3 次返回 usage |
+| **Queue Time Avg/P50/P90/P99** | 请求从生成到实际发送的排队等待时间（ms），仅 Open-loop 模式显示 |
 
 > OpenAI 兼容 Chat Completions 流式请求默认附带 `stream_options: {"include_usage": true}` 以请求 usage chunk；如 Provider 不支持或不返回 `usage`，结果页会显示 `N/A` / missing 计数，不影响性能指标统计。Custom Params 仍可覆盖该字段。
 
