@@ -229,11 +229,16 @@ func (m *configModel) toggleLoadModel() {
 
 // toggleFocusedField flips the state of the currently focused toggle field.
 func (m *configModel) toggleFocusedField() {
+	if m.focusIndex < 0 || m.focusIndex >= len(m.fieldDefs) {
+		return
+	}
 	switch m.fieldDefs[m.focusIndex].label {
 	case "Load Model":
 		m.toggleLoadModel()
 	case "TTFT Includes Reasoning":
 		m.ttftReasoningOn = !m.ttftReasoningOn
+	default:
+		panic(fmt.Sprintf("no toggle handler for field %q", m.fieldDefs[m.focusIndex].label))
 	}
 }
 
@@ -551,5 +556,5 @@ func (m configModel) renderToggle(label string) string {
 		}
 		return "( ) yes  (●) no"
 	}
-	return ""
+	panic(fmt.Sprintf("no toggle renderer for field %q", label))
 }

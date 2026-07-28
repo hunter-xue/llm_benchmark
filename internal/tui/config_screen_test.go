@@ -392,6 +392,20 @@ func TestBuildFieldDefs_TTFTReasoningToggleVisibility(t *testing.T) {
 	if containsLabel(fieldLabels(embeddingDefs), "TTFT Includes Reasoning") {
 		t.Error("embedding mode should not include TTFT Includes Reasoning toggle")
 	}
+
+	pkDefs := buildFieldDefs(bench.ModeCompletion, "pk", 0)
+	pkFound := false
+	for _, d := range pkDefs {
+		if d.label == "TTFT Includes Reasoning" {
+			pkFound = true
+			if d.fieldType != "toggle" {
+				t.Error("PK mode: TTFT Includes Reasoning should have fieldType \"toggle\"")
+			}
+		}
+	}
+	if !pkFound {
+		t.Error("PK completion mode should include TTFT Includes Reasoning toggle")
+	}
 }
 
 func TestValidate_TTFTIncludesReasoning(t *testing.T) {
