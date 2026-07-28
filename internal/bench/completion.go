@@ -42,7 +42,9 @@ type apiUsage struct {
 type streamChunk struct {
 	Choices []struct {
 		Delta struct {
-			Content string `json:"content"`
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content"`
+			Reasoning        string `json:"reasoning"`
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
@@ -301,6 +303,7 @@ func doCompletionRequest(
 		lastTokenTime  time.Time
 		outputBuf      strings.Builder
 		gotFirstToken  bool
+		gotContent     bool
 		skippedChunks  int
 	)
 
@@ -331,7 +334,11 @@ func doCompletionRequest(
 
 		for _, choice := range chunk.Choices {
 			content := choice.Delta.Content
-			if content == "" {
+			reasoning := choice.Delta.ReasoningContent
+			if reasoning == "" {
+				reasoning = choice.Delta.Reasoning
+			}
+			if content == "" && !(cfg.TTFTIncludesReasoning && reasoning != "") {
 				continue
 			}
 			now := time.Now()
@@ -340,7 +347,10 @@ func doCompletionRequest(
 				gotFirstToken = true
 			}
 			lastTokenTime = now
-			outputBuf.WriteString(content)
+			if content != "" {
+				gotContent = true
+				outputBuf.WriteString(content)
+			}
 		}
 	}
 
@@ -349,7 +359,7 @@ func doCompletionRequest(
 		return res
 	}
 
-	if !gotFirstToken {
+	if !gotContent {
 		res.Err = fmt.Errorf("no output tokens received")
 		return res
 	}

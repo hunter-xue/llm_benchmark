@@ -31,15 +31,16 @@ type ProviderConfig struct {
 
 // BenchConfig holds shared benchmark parameters.
 type BenchConfig struct {
-	Mode            string // "embedding" or "completion"
-	Concurrency     int
-	TotalRequests   int
-	TargetTokens    int
-	MaxOutputTokens int    // completion only, 0 = unlimited
-	SystemPrompt    string // completion only
-	LoadModel       string // "closed_loop" (default) or "open_loop"
-	RequestRate     int    // open-loop: requests per second (Poisson rate)
-	MaxInFlight     int    // open-loop: max concurrent in-flight requests
+	Mode                  string // "embedding" or "completion"
+	Concurrency           int
+	TotalRequests         int
+	TargetTokens          int
+	MaxOutputTokens       int    // completion only, 0 = unlimited
+	SystemPrompt          string // completion only
+	LoadModel             string // "closed_loop" (default) or "open_loop"
+	RequestRate           int    // open-loop: requests per second (Poisson rate)
+	MaxInFlight           int    // open-loop: max concurrent in-flight requests
+	TTFTIncludesReasoning bool   // completion-like: first reasoning/thinking token stops the TTFT clock
 }
 
 // ProgressUpdate reports benchmark progress and optional per-request error details.
