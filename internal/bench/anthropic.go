@@ -285,6 +285,7 @@ func doAnthropicRequest(
 		lastTokenTime  time.Time
 		outputBuf      strings.Builder
 		gotFirstToken  bool
+		gotContent     bool
 		skippedChunks  int
 		eventType      string
 	)
@@ -318,13 +319,19 @@ func doAnthropicRequest(
 		if eventType != "content_block_delta" {
 			continue
 		}
-		if chunk.Delta.Type == "text_delta" && chunk.Delta.Text != "" {
-			now := time.Now()
-			if !gotFirstToken {
-				firstTokenTime = now
-				gotFirstToken = true
-			}
-			lastTokenTime = now
+		isText := chunk.Delta.Type == "text_delta" && chunk.Delta.Text != ""
+		isThinking := chunk.Delta.Type == "thinking_delta"
+		if !isText && !(cfg.TTFTIncludesReasoning && isThinking) {
+			continue
+		}
+		now := time.Now()
+		if !gotFirstToken {
+			firstTokenTime = now
+			gotFirstToken = true
+		}
+		lastTokenTime = now
+		if isText {
+			gotContent = true
 			outputBuf.WriteString(chunk.Delta.Text)
 		}
 	}
@@ -334,7 +341,7 @@ func doAnthropicRequest(
 		return res
 	}
 
-	if !gotFirstToken {
+	if !gotContent {
 		res.Err = fmt.Errorf("no output tokens received")
 		return res
 	}

@@ -140,3 +140,100 @@ func TestDoCompletionRequest_ReasoningNotCountedInOutput(t *testing.T) {
 		t.Errorf("OutputTokens=%d, want %d (reasoning text must not be counted)", res.OutputTokens, want)
 	}
 }
+
+// reasoningFieldThenContentServer is like reasoningThenContentServer but uses
+// the OpenRouter-style `reasoning` delta field instead of `reasoning_content`.
+func reasoningFieldThenContentServer(t *testing.T, gap time.Duration) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher := w.(http.Flusher)
+		fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"reasoning\":\"thinking...\"}}]}\n\n")
+		flusher.Flush()
+		time.Sleep(gap)
+		fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\n")
+		flusher.Flush()
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	}))
+}
+
+func TestDoCompletionRequest_TTFTIncludesReasoningField(t *testing.T) {
+	gap := 150 * time.Millisecond
+	server := reasoningFieldThenContentServer(t, gap)
+	defer server.Close()
+
+	res := doSingleCompletion(t, server, true)
+	if res.Err != nil {
+		t.Fatalf("unexpected error: %v", res.Err)
+	}
+	if res.TTFT >= gap {
+		t.Errorf("TTFT=%v should stop at the `reasoning`-field chunk (< %v)", res.TTFT, gap)
+	}
+}
+
+// anthropicThinkingThenTextServer emits a thinking_delta immediately, waits
+// gap, then a text_delta, then message_stop.
+func anthropicThinkingThenTextServer(t *testing.T, gap time.Duration) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher := w.(http.Flusher)
+		fmt.Fprintf(w, "event: content_block_delta\n")
+		fmt.Fprintf(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"hmm\"}}\n\n")
+		flusher.Flush()
+		time.Sleep(gap)
+		fmt.Fprintf(w, "event: content_block_delta\n")
+		fmt.Fprintf(w, "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n\n")
+		flusher.Flush()
+		fmt.Fprintf(w, "event: message_stop\n")
+		fmt.Fprintf(w, "data: {\"type\":\"message_stop\"}\n\n")
+		flusher.Flush()
+	}))
+}
+
+func doSingleAnthropic(t *testing.T, server *httptest.Server, ttftReasoning bool) completionResult {
+	t.Helper()
+	tkm := testTokenizer(t)
+	provider := ProviderConfig{URL: server.URL, Model: "test-model"}
+	cfg := BenchConfig{
+		Mode:                  ModeAnthropicMessages,
+		TTFTIncludesReasoning: ttftReasoning,
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	return doAnthropicRequest(context.Background(), client, provider, cfg, "test prompt", 2, tkm)
+}
+
+func TestDoAnthropicRequest_TTFTIncludesThinking(t *testing.T) {
+	gap := 150 * time.Millisecond
+	server := anthropicThinkingThenTextServer(t, gap)
+	defer server.Close()
+
+	res := doSingleAnthropic(t, server, true)
+	if res.Err != nil {
+		t.Fatalf("unexpected error: %v", res.Err)
+	}
+	if res.TTFT >= gap {
+		t.Errorf("TTFT=%v should stop at the thinking delta (< %v)", res.TTFT, gap)
+	}
+	want := len(testTokenizer(t).Encode("Hello", nil, nil))
+	if res.OutputTokens != want {
+		t.Errorf("OutputTokens=%d, want %d (thinking text must not be counted)", res.OutputTokens, want)
+	}
+}
+
+func TestDoAnthropicRequest_TTFTExcludesThinking(t *testing.T) {
+	gap := 150 * time.Millisecond
+	server := anthropicThinkingThenTextServer(t, gap)
+	defer server.Close()
+
+	res := doSingleAnthropic(t, server, false)
+	if res.Err != nil {
+		t.Fatalf("unexpected error: %v", res.Err)
+	}
+	if res.TTFT < gap {
+		t.Errorf("TTFT=%v should wait for the first text delta (>= %v)", res.TTFT, gap)
+	}
+}
