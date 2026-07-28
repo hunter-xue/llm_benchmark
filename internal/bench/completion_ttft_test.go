@@ -2,7 +2,9 @@ package bench
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -265,5 +267,51 @@ func TestDoAnthropicRequest_ThinkingOnlyStreamIsError(t *testing.T) {
 	}
 	if !strings.Contains(res.Err.Error(), "no output tokens received") {
 		t.Errorf("error = %q, want it to mention %q", res.Err.Error(), "no output tokens received")
+	}
+}
+
+// TestDoCompletionRequest_WirePayload verifies the actual JSON bytes sent to the
+// provider: model/messages/stream, max_tokens when MaxOutputTokens > 0, and
+// stream_options.include_usage.
+func TestDoCompletionRequest_WirePayload(t *testing.T) {
+	var captured []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher := w.(http.Flusher)
+		fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n")
+		flusher.Flush()
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	}))
+	defer server.Close()
+
+	tkm := testTokenizer(t)
+	provider := ProviderConfig{URL: server.URL, Model: "kimi-k2.6"}
+	cfg := BenchConfig{Mode: ModeCompletion, MaxOutputTokens: 1024, TTFTIncludesReasoning: true}
+	client := &http.Client{Timeout: 10 * time.Second}
+	res := doCompletionRequest(context.Background(), client, provider, cfg, "test prompt", 2, tkm)
+	if res.Err != nil {
+		t.Fatalf("unexpected error: %v", res.Err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(captured, &payload); err != nil {
+		t.Fatalf("captured body is not JSON: %v\nbody: %s", err, captured)
+	}
+	t.Logf("wire payload: %s", captured)
+	if payload["model"] != "kimi-k2.6" {
+		t.Errorf("model = %v, want kimi-k2.6", payload["model"])
+	}
+	if payload["stream"] != true {
+		t.Errorf("stream = %v, want true", payload["stream"])
+	}
+	if payload["max_tokens"] != float64(1024) {
+		t.Errorf("max_tokens = %v, want 1024", payload["max_tokens"])
+	}
+	so, ok := payload["stream_options"].(map[string]any)
+	if !ok || so["include_usage"] != true {
+		t.Errorf("stream_options.include_usage = %v, want true", payload["stream_options"])
 	}
 }
