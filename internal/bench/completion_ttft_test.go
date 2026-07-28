@@ -237,3 +237,33 @@ func TestDoAnthropicRequest_TTFTExcludesThinking(t *testing.T) {
 		t.Errorf("TTFT=%v should wait for the first text delta (>= %v)", res.TTFT, gap)
 	}
 }
+
+// anthropicThinkingOnlyServer emits one thinking_delta then message_stop,
+// without any text_delta.
+func anthropicThinkingOnlyServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher := w.(http.Flusher)
+		fmt.Fprintf(w, "event: content_block_delta\n")
+		fmt.Fprintf(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"hmm\"}}\n\n")
+		flusher.Flush()
+		fmt.Fprintf(w, "event: message_stop\n")
+		fmt.Fprintf(w, "data: {\"type\":\"message_stop\"}\n\n")
+		flusher.Flush()
+	}))
+}
+
+func TestDoAnthropicRequest_ThinkingOnlyStreamIsError(t *testing.T) {
+	server := anthropicThinkingOnlyServer(t)
+	defer server.Close()
+
+	res := doSingleAnthropic(t, server, true)
+	if res.Err == nil {
+		t.Fatal("thinking-only stream should be an error")
+	}
+	if !strings.Contains(res.Err.Error(), "no output tokens received") {
+		t.Errorf("error = %q, want it to mention %q", res.Err.Error(), "no output tokens received")
+	}
+}
