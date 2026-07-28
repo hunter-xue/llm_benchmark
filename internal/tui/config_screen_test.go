@@ -77,7 +77,7 @@ func TestBuildFieldDefs_CompletionClosedLoop(t *testing.T) {
 	assertLabelOrder(t, defs, []string{
 		"API URL", "API Key", "Model", "Custom Params",
 		"Load Model", "Concurrency", "Total Requests", "Input Tokens",
-		"Max Output Tokens", "System Prompt",
+		"Max Output Tokens", "TTFT Includes Reasoning", "System Prompt",
 	})
 }
 
@@ -100,7 +100,7 @@ func TestBuildFieldDefs_CompletionOpenLoop(t *testing.T) {
 	assertLabelOrder(t, defs, []string{
 		"API URL", "API Key", "Model", "Custom Params",
 		"Load Model", "Max In-Flight", "Request Rate", "Total Requests", "Input Tokens",
-		"Max Output Tokens", "System Prompt",
+		"Max Output Tokens", "TTFT Includes Reasoning", "System Prompt",
 	})
 }
 
@@ -365,5 +365,96 @@ func TestToggleLoadModel_IgnoredForEmbedding(t *testing.T) {
 	}
 	if containsLabel(fieldLabels(m.fieldDefs), "Load Model") {
 		t.Error("embedding fields should not include Load Model after toggle attempt")
+	}
+}
+
+func TestBuildFieldDefs_TTFTReasoningToggleVisibility(t *testing.T) {
+	completionDefs := buildFieldDefs(bench.ModeCompletion, "single", 0)
+	found := false
+	for _, d := range completionDefs {
+		if d.label == "TTFT Includes Reasoning" {
+			found = true
+			if d.fieldType != "toggle" {
+				t.Error("TTFT Includes Reasoning should have fieldType \"toggle\"")
+			}
+		}
+	}
+	if !found {
+		t.Error("completion mode should include TTFT Includes Reasoning toggle")
+	}
+
+	anthropicDefs := buildFieldDefs(bench.ModeAnthropicMessages, "single", 0)
+	if !containsLabel(fieldLabels(anthropicDefs), "TTFT Includes Reasoning") {
+		t.Error("anthropic mode should include TTFT Includes Reasoning toggle")
+	}
+
+	embeddingDefs := buildFieldDefs(bench.ModeEmbedding, "single", 0)
+	if containsLabel(fieldLabels(embeddingDefs), "TTFT Includes Reasoning") {
+		t.Error("embedding mode should not include TTFT Includes Reasoning toggle")
+	}
+}
+
+func TestValidate_TTFTIncludesReasoning(t *testing.T) {
+	m := newConfigModel(bench.ModeCompletion, "single")
+	if !m.ttftReasoningOn {
+		t.Error("expected ttftReasoningOn default true")
+	}
+
+	setInputsByLabel(&m, map[string]string{
+		"API URL":        "https://api.openai.com/v1/chat/completions",
+		"Model":          "gpt-4o-mini",
+		"Concurrency":    "10",
+		"Total Requests": "10",
+		"Input Tokens":   "100",
+	})
+
+	_, cfg, err := m.validate()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.TTFTIncludesReasoning {
+		t.Error("expected cfg.TTFTIncludesReasoning=true by default")
+	}
+
+	m.ttftReasoningOn = false
+	_, cfg, err = m.validate()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.TTFTIncludesReasoning {
+		t.Error("expected cfg.TTFTIncludesReasoning=false after toggle off")
+	}
+}
+
+func TestToggleFocusedField_Dispatch(t *testing.T) {
+	m := newConfigModel(bench.ModeCompletion, "single")
+
+	focusByLabel := func(label string) {
+		t.Helper()
+		for i, fd := range m.fieldDefs {
+			if fd.label == label {
+				m.focusIndex = i
+				return
+			}
+		}
+		t.Fatalf("field %q not found", label)
+	}
+
+	focusByLabel("TTFT Includes Reasoning")
+	m.toggleFocusedField()
+	if m.ttftReasoningOn {
+		t.Error("expected ttftReasoningOn=false after toggle")
+	}
+	if m.loadModelIndex != 0 {
+		t.Error("TTFT toggle should not affect loadModelIndex")
+	}
+
+	focusByLabel("Load Model")
+	m.toggleFocusedField()
+	if m.loadModelIndex != 1 {
+		t.Error("expected loadModelIndex=1 after Load Model toggle")
+	}
+	if m.ttftReasoningOn {
+		t.Error("Load Model toggle should not affect ttftReasoningOn")
 	}
 }

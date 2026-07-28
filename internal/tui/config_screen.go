@@ -20,20 +20,22 @@ type fieldDef struct {
 }
 
 type configModel struct {
-	apiMode        string
-	testMode       string
-	inputs         []textinput.Model
-	fieldDefs      []fieldDef
-	focusIndex     int
-	err            string
-	width          int
-	loadModelIndex int // 0 = closed-loop, 1 = open-loop (completion only)
+	apiMode         string
+	testMode        string
+	inputs          []textinput.Model
+	fieldDefs       []fieldDef
+	focusIndex      int
+	err             string
+	width           int
+	loadModelIndex  int  // 0 = closed-loop, 1 = open-loop (completion only)
+	ttftReasoningOn bool // TTFT Includes Reasoning toggle (completion-like modes)
 }
 
 func newConfigModel(apiMode, testMode string) configModel {
 	m := configModel{
-		apiMode:  apiMode,
-		testMode: testMode,
+		apiMode:         apiMode,
+		testMode:        testMode,
+		ttftReasoningOn: true,
 	}
 	m.rebuildFields()
 	if len(m.inputs) > 0 {
@@ -97,6 +99,12 @@ func buildFieldDefs(apiMode, testMode string, loadModelIndex int) []fieldDef {
 		fieldType: "toggle",
 	}
 
+	// TTFT reasoning toggle field (completion-like modes)
+	ttftReasoningField := fieldDef{
+		label:     "TTFT Includes Reasoning",
+		fieldType: "toggle",
+	}
+
 	// Concurrency fields for closed-loop vs open-loop
 	concurrencyField := fieldDef{label: "Concurrency", placeholder: "e.g. 10"}
 	maxInFlightField := fieldDef{label: "Max In-Flight", placeholder: "equivalent to Concurrency, e.g. 10"}
@@ -149,6 +157,7 @@ func buildFieldDefs(apiMode, testMode string, loadModelIndex int) []fieldDef {
 		if isCompletionLike {
 			defs = append(defs,
 				fieldDef{label: "Max Output Tokens", placeholder: maxTokPlaceholder},
+				ttftReasoningField,
 				fieldDef{label: "System Prompt", placeholder: "optional, leave blank to skip"},
 			)
 		}
@@ -190,6 +199,7 @@ func buildFieldDefs(apiMode, testMode string, loadModelIndex int) []fieldDef {
 	if isCompletionLike {
 		defs = append(defs,
 			fieldDef{label: "Max Output Tokens", placeholder: maxTokPlaceholder},
+			ttftReasoningField,
 			fieldDef{label: "System Prompt", placeholder: "optional, leave blank to skip"},
 		)
 	}
@@ -217,6 +227,16 @@ func (m *configModel) toggleLoadModel() {
 	m.rebuildFields()
 }
 
+// toggleFocusedField flips the state of the currently focused toggle field.
+func (m *configModel) toggleFocusedField() {
+	switch m.fieldDefs[m.focusIndex].label {
+	case "Load Model":
+		m.toggleLoadModel()
+	case "TTFT Includes Reasoning":
+		m.ttftReasoningOn = !m.ttftReasoningOn
+	}
+}
+
 func (m configModel) update(msg tea.Msg) (configModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -231,7 +251,7 @@ func (m configModel) update(msg tea.Msg) (configModel, tea.Cmd) {
 			return m, m.inputs[m.focusIndex].Focus()
 		case "left", "right":
 			if m.isToggleField() {
-				m.toggleLoadModel()
+				m.toggleFocusedField()
 				return m, nil
 			}
 		}
@@ -366,6 +386,7 @@ func (m configModel) validate() ([]bench.ProviderConfig, bench.BenchConfig, erro
 			maxTok, _ := strconv.Atoi(vals[fieldIdx("Max Output Tokens")])
 			cfg.MaxOutputTokens = maxTok
 			cfg.SystemPrompt = vals[fieldIdx("System Prompt")]
+			cfg.TTFTIncludesReasoning = m.ttftReasoningOn
 		}
 		providers := []bench.ProviderConfig{
 			{Name: vals[fieldIdx("Provider A Name")], URL: urlA, APIKey: vals[fieldIdx("Provider A API Key")], Model: vals[modelAIdx], CustomParams: vals[customAIdx]},
@@ -441,6 +462,7 @@ func (m configModel) validate() ([]bench.ProviderConfig, bench.BenchConfig, erro
 		maxTok, _ := strconv.Atoi(vals[fieldIdx("Max Output Tokens")])
 		cfg.MaxOutputTokens = maxTok
 		cfg.SystemPrompt = vals[fieldIdx("System Prompt")]
+		cfg.TTFTIncludesReasoning = m.ttftReasoningOn
 	}
 	providers := []bench.ProviderConfig{
 		{Name: "Provider", URL: apiURL, APIKey: vals[keyIdx], Model: vals[modelIdx], CustomParams: vals[customIdx]},
@@ -482,7 +504,7 @@ func (m configModel) view(width, height int) string {
 				cursor = "> "
 			}
 			if m.fieldDefs[i].fieldType == "toggle" {
-				toggle := renderLoadModelToggle(m.loadModelIndex)
+				toggle := m.renderToggle(m.fieldDefs[i].label)
 				sb.WriteString(fmt.Sprintf("%s%s  %s\n", cursor, label, toggle))
 			} else {
 				inp := m.inputs[i].View()
@@ -515,10 +537,19 @@ func (m configModel) view(width, height int) string {
 	return sb.String()
 }
 
-// renderLoadModelToggle renders the radio buttons for load model selection.
-func renderLoadModelToggle(loadModelIndex int) string {
-	if loadModelIndex == 0 {
-		return "(●) closed-loop  ( ) open-loop"
+// renderToggle renders the radio buttons for the toggle field with the given label.
+func (m configModel) renderToggle(label string) string {
+	switch label {
+	case "Load Model":
+		if m.loadModelIndex == 0 {
+			return "(●) closed-loop  ( ) open-loop"
+		}
+		return "( ) closed-loop  (●) open-loop"
+	case "TTFT Includes Reasoning":
+		if m.ttftReasoningOn {
+			return "(●) yes  ( ) no"
+		}
+		return "( ) yes  (●) no"
 	}
-	return "( ) closed-loop  (●) open-loop"
+	return ""
 }
