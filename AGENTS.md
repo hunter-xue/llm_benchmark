@@ -73,6 +73,7 @@ ModeSelect -> TestModeSelect -> ConfigScreen -> RunningScreen -> ResultsScreen
 - **Token counting**: Uses `tiktoken-go` with the embedded `cl100k_base` encoding (offline only — `offlineOnlyBpeLoader` blocks network downloads). `--bpe-file` optionally overrides the embedded BPE file.
 - **Benchmark input generation**: Main benchmark modes generate exact-length prompts from the embedded natural sentence pool. `GenerateMeaningfulTextByTokens` strictly matches `TargetTokens`; `GenerateTextByTokens` remains as a fallback.
 - **API usage reporting**: Completion reports keep local tiktoken-based performance counters and separately aggregate API-returned raw token usage fields (`APIPromptTokens`, `APICompletionTokens`, `APITotalTokens`, `APIUsageCount`, `MissingAPIUsageCount`). OpenAI-compatible streaming requests default to `stream_options.include_usage=true`; Custom Params can override it. Missing usage is shown as `N/A`, never counted as zero.
+- **TTFT semantics**: For completion-like modes, the `TTFT Includes Reasoning` config toggle (default on) controls whether the first reasoning token stops the TTFT clock — `reasoning_content`/`reasoning` delta fields for OpenAI-compatible APIs, `thinking_delta` events for Anthropic. Request success still requires answer content (reasoning-only streams are errors), and reasoning text never enters OutputTokens/TPOT statistics. Providers that inline `<think>` tags in content are indistinguishable from answer text and always count as content.
 - **Concurrency model**: Two modes selectable via Load Model toggle in config screen (Chat Completion only):
   - **Closed-loop** (default): Buffered `taskQueue` channel pre-filled with N tasks; `concurrency` goroutines drain it.
   - **Open-loop**: Generator goroutine produces requests at Poisson intervals (`Request Rate` req/s); semaphore limits max in-flight requests (`Max In-Flight`). Queue time measured per request.
@@ -89,6 +90,7 @@ type BenchConfig struct {
     LoadModel string        // "closed_loop" (default) or "open_loop"
     RequestRate int         // open-loop: requests per second
     MaxInFlight int         // open-loop: max concurrent in-flight
+    TTFTIncludesReasoning bool // completion-like: first reasoning/thinking token stops the TTFT clock
 }
 type EmbeddingReport struct { ...; ErrorDetails, ErrorCategories map[string]int; Valid bool }
 type CompletionReport struct { ...; APIPromptTokens, APICompletionTokens, APITotalTokens, APIUsageCount, MissingAPIUsageCount int; ErrorDetails, ErrorCategories map[string]int; Valid bool }
