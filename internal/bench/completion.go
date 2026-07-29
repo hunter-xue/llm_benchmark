@@ -163,10 +163,11 @@ func RunCompletionBench(
 
 	wg.Wait()
 	close(results)
+	wallTime := time.Since(startTime)
+
 	if logger != nil {
 		logger.Close()
 	}
-	wallTime := time.Since(startTime)
 
 	var (
 		ttfts              []float64
