@@ -492,3 +492,106 @@ func TestDoCompletionRequest_LogsNoContentStream(t *testing.T) {
 		t.Errorf("chunks = %v, want just [DONE]", e.Chunks)
 	}
 }
+
+func TestRunCompletionBench_LogsEndToEnd(t *testing.T) {
+	server := loggedRequestServer(t)
+	defer server.Close()
+
+	old := requestLogDir
+	requestLogDir = t.TempDir()
+	defer func() { requestLogDir = old }()
+
+	tkm := testTokenizer(t)
+	provider := ProviderConfig{URL: server.URL, Model: "test-model", APIKey: "sk-abcdefgh"}
+	cfg := BenchConfig{
+		Mode:                  ModeCompletion,
+		Concurrency:           2,
+		TotalRequests:         3,
+		TTFTIncludesReasoning: true,
+		RequestLogging:        true,
+	}
+	report := RunCompletionBench(context.Background(), provider, cfg, "test prompt", 2, tkm, nil)
+	if !report.Valid {
+		t.Fatalf("report invalid; errors: %v", report.ErrorDetails)
+	}
+	if report.SuccessCount != 3 {
+		t.Errorf("SuccessCount = %d, want 3", report.SuccessCount)
+	}
+	if report.LogRequestsFile == "" || report.LogResponsesFile == "" {
+		t.Fatalf("log file paths empty: %q / %q", report.LogRequestsFile, report.LogResponsesFile)
+	}
+	if report.LogDroppedCount != 0 {
+		t.Errorf("LogDroppedCount = %d, want 0", report.LogDroppedCount)
+	}
+	if report.LogError != "" {
+		t.Errorf("LogError = %q, want empty", report.LogError)
+	}
+
+	reqLines := readJSONLLines(t, report.LogRequestsFile)
+	respLines := readJSONLLines(t, report.LogResponsesFile)
+	if len(reqLines) != 3 || len(respLines) != 3 {
+		t.Fatalf("lines = %d requests / %d responses, want 3/3", len(reqLines), len(respLines))
+	}
+
+	// Every request ID has exactly one request entry and one response entry.
+	reqIDs := make(map[string]bool)
+	for _, line := range reqLines {
+		var e requestLogEntry
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			t.Fatalf("invalid request JSON: %v", err)
+		}
+		if e.Headers["Authorization"] != "Bearer ***efgh" {
+			t.Errorf("Authorization = %q, want redacted", e.Headers["Authorization"])
+		}
+		reqIDs[e.RequestID] = false
+	}
+	if len(reqIDs) != 3 {
+		t.Fatalf("distinct request IDs = %d, want 3", len(reqIDs))
+	}
+	for _, line := range respLines {
+		var e responseLogEntry
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			t.Fatalf("invalid response JSON: %v", err)
+		}
+		if _, ok := reqIDs[e.RequestID]; !ok {
+			t.Errorf("response request_id %q has no request entry", e.RequestID)
+		}
+		reqIDs[e.RequestID] = true
+		if len(e.Chunks) == 0 {
+			t.Errorf("response %q has no chunks", e.RequestID)
+		}
+	}
+	for id, matched := range reqIDs {
+		if !matched {
+			t.Errorf("request %q has no response entry", id)
+		}
+	}
+}
+
+func TestRunCompletionBench_LoggingDisabledByDefault(t *testing.T) {
+	server := loggedRequestServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	old := requestLogDir
+	requestLogDir = dir
+	defer func() { requestLogDir = old }()
+
+	tkm := testTokenizer(t)
+	provider := ProviderConfig{URL: server.URL, Model: "test-model"}
+	cfg := BenchConfig{Mode: ModeCompletion, Concurrency: 1, TotalRequests: 1, TTFTIncludesReasoning: true}
+	report := RunCompletionBench(context.Background(), provider, cfg, "test prompt", 2, tkm, nil)
+	if !report.Valid {
+		t.Fatalf("report invalid; errors: %v", report.ErrorDetails)
+	}
+	if report.LogRequestsFile != "" || report.LogResponsesFile != "" {
+		t.Errorf("log paths should be empty when disabled: %q / %q", report.LogRequestsFile, report.LogResponsesFile)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("readdir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("no log files should be created, found %d", len(entries))
+	}
+}

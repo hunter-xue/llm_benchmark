@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	tiktoken "github.com/pkoukk/tiktoken-go"
@@ -75,6 +76,22 @@ func RunCompletionBench(
 	tkm *tiktoken.Tiktoken,
 	onProgress func(ProgressUpdate),
 ) CompletionReport {
+	var logger *RequestLogger
+	runID := time.Now().Format("20060102-150405")
+	if cfg.RequestLogging {
+		l, err := NewRequestLogger(requestLogDir, runID)
+		if err != nil {
+			return CompletionReport{
+				TotalRequests:   cfg.TotalRequests,
+				ErrorDetails:    map[string]int{fmt.Sprintf("failed to initialize request logging: %v", err): 1},
+				ErrorCategories: map[string]int{ErrorCategoryClient: 1},
+				Valid:           false,
+			}
+		}
+		logger = l
+	}
+	var reqSeq atomic.Int64
+
 	results := make(chan completionResult, cfg.TotalRequests)
 
 	taskQueue := make(chan struct{}, cfg.TotalRequests)
@@ -118,7 +135,11 @@ func RunCompletionBench(
 				default:
 				}
 
-				res := doCompletionRequest(ctx, client, provider, cfg, testText, actualInputTokens, tkm, "", nil)
+				reqID := ""
+				if logger != nil {
+					reqID = fmt.Sprintf("%s-%06d", runID, reqSeq.Add(1))
+				}
+				res := doCompletionRequest(ctx, client, provider, cfg, testText, actualInputTokens, tkm, reqID, logger)
 				results <- res
 				mu.Lock()
 				if res.Err != nil {
@@ -142,6 +163,9 @@ func RunCompletionBench(
 
 	wg.Wait()
 	close(results)
+	if logger != nil {
+		logger.Close()
+	}
 	wallTime := time.Since(startTime)
 
 	var (
@@ -230,6 +254,14 @@ func RunCompletionBench(
 			report.TPOTp50 = percentile(tpots, 0.50)
 			report.TPOTp90 = percentile(tpots, 0.90)
 			report.TPOTp99 = percentile(tpots, 0.99)
+		}
+	}
+	if logger != nil {
+		report.LogRequestsFile = logger.RequestsFile()
+		report.LogResponsesFile = logger.ResponsesFile()
+		report.LogDroppedCount = int(logger.DroppedCount())
+		if err := logger.Err(); err != nil {
+			report.LogError = err.Error()
 		}
 	}
 	return report
