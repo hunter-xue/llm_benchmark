@@ -251,6 +251,23 @@ Chat Completion 单 Provider 压测支持请求日志：在配置页将 `Request
 
 ---
 
+## 自动 Markdown 报告
+
+压测（Embedding / Chat Completion / Anthropic Messages，单 Provider 与 PK）和 Prompt Cache Hit 测试完成后，会在当前目录自动生成一份 markdown 报告，无需手动操作：
+
+- 压测报告：`bench_report_YYYYMMDD_HHMMSS.md`（PK 模式为单个合并文件，含两家对比）
+- Cache Hit 报告：`cache_hit_report_YYYYMMDD_HHMMSS.md`（含逐请求明细表）
+
+报告内容：
+
+- **Test Parameters**：本次测试使用的全部参数（API Key 脱敏为 `***last4`）
+- **Results**：与 TUI 结果页一致的指标，markdown 表格展示（PK 模式胜出值加粗，全部失败的 provider 显示 `N/A`）
+- **Logs**：开启 Request Logging 时列出请求/响应 JSONL 日志文件名及丢弃/写错误警告
+
+结果页底部显示 `Report saved: <文件名>`；写入失败仅显示警告，不影响结果展示。每次测试生成新文件，不会覆盖历史报告。手动 `ctrl+e` 纯文本导出功能不受影响。
+
+---
+
 ## 思考（Reasoning / Thinking）模型注意事项
 
 ### Max Output Tokens 与思考共享预算 —— 以 kimi-k2.6 为例

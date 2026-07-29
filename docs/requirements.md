@@ -134,6 +134,9 @@
 | F-102 | 使用用户粘贴的 User Prompt，重复发送同一非流式 Chat Completions 请求，默认每 3 秒一次 | ✅ 已实现 |
 | F-103 | 从响应 `usage.prompt_tokens_details.cached_tokens` 读取缓存命中 token，并统计累计 prompt tokens、cached tokens、overall hit rate、avg request hit rate | ✅ 已实现 |
 | F-104 | Provider 不返回 `usage` 或 `cached_tokens` 时显示 `N/A` / missing 计数，不按 0 命中处理 | ✅ 已实现 |
+| F-105 | 压测完成后自动将测试参数与结果写入当前目录的 markdown 文件（`bench_report_<时间戳>.md`，PK 合并为单个文件，结果用 markdown 表格展示） | ✅ 已实现 |
+| F-106 | Prompt Cache Hit 测试完成后自动写入 `cache_hit_report_<时间戳>.md`，含逐请求明细表 | ✅ 已实现 |
+| F-107 | markdown 报告包含脱敏的测试参数（API Key `***last4`）；开启 Request Logging 时包含日志文件名；结果页显示 `Report saved: <文件名>` 或写失败警告 | ✅ 已实现 |
 
 ### 2.12 结果导出
 
