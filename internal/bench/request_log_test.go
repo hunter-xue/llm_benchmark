@@ -328,7 +328,7 @@ func TestDoCompletionRequest_LogsHTTPError(t *testing.T) {
 	}
 }
 
-func TestDoCompletionRequest_NilLoggerWritesNothing(t *testing.T) {
+func TestDoCompletionRequest_NilLoggerNoPanic(t *testing.T) {
 	server := loggedRequestServer(t)
 	defer server.Close()
 
@@ -339,5 +339,156 @@ func TestDoCompletionRequest_NilLoggerWritesNothing(t *testing.T) {
 	res := doCompletionRequest(context.Background(), client, provider, cfg, "test prompt", 2, tkm, "", nil)
 	if res.Err != nil {
 		t.Fatalf("unexpected error: %v", res.Err)
+	}
+}
+
+func TestDoCompletionRequest_LogsTransportError(t *testing.T) {
+	// Server closed before the request -> client.Do fails.
+	server := loggedRequestServer(t)
+	url := server.URL
+	server.Close()
+
+	dir := t.TempDir()
+	logger, err := NewRequestLogger(dir, "run1")
+	if err != nil {
+		t.Fatalf("NewRequestLogger: %v", err)
+	}
+
+	tkm := testTokenizer(t)
+	provider := ProviderConfig{URL: url, Model: "test-model"}
+	cfg := BenchConfig{Mode: ModeCompletion, RequestLogging: true}
+	client := &http.Client{Timeout: 2 * time.Second}
+	res := doCompletionRequest(context.Background(), client, provider, cfg, "test prompt", 2, tkm, "run1-000009", logger)
+	if res.Err == nil {
+		t.Fatal("expected transport error")
+	}
+	logger.Close()
+
+	// The request itself must still be logged (it was attempted).
+	reqLines := readJSONLLines(t, filepath.Join(dir, "bench_requests_run1.jsonl"))
+	if len(reqLines) != 1 {
+		t.Fatalf("requests lines = %d, want 1", len(reqLines))
+	}
+
+	respLines := readJSONLLines(t, filepath.Join(dir, "bench_responses_run1.jsonl"))
+	if len(respLines) != 1 {
+		t.Fatalf("responses lines = %d, want 1", len(respLines))
+	}
+	var e responseLogEntry
+	if err := json.Unmarshal([]byte(respLines[0]), &e); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if e.RequestID != "run1-000009" {
+		t.Errorf("request_id = %q", e.RequestID)
+	}
+	if e.Status != "" {
+		t.Errorf("status = %q, want empty (no response received)", e.Status)
+	}
+	if e.Error == "" {
+		t.Error("error must be set for transport failure")
+	}
+	if len(e.Chunks) != 0 {
+		t.Errorf("chunks = %v, want empty", e.Chunks)
+	}
+}
+
+func TestDoCompletionRequest_LogsMidStreamError(t *testing.T) {
+	// Server streams one chunk then hijacks and kills the connection.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher := w.(http.Flusher)
+		fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\n")
+		flusher.Flush()
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Error("server does not support hijacking")
+			return
+		}
+		conn, _, err := hj.Hijack()
+		if err != nil {
+			t.Errorf("hijack: %v", err)
+			return
+		}
+		conn.Close()
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	logger, err := NewRequestLogger(dir, "run1")
+	if err != nil {
+		t.Fatalf("NewRequestLogger: %v", err)
+	}
+
+	tkm := testTokenizer(t)
+	provider := ProviderConfig{URL: server.URL, Model: "test-model"}
+	cfg := BenchConfig{Mode: ModeCompletion, RequestLogging: true}
+	client := &http.Client{Timeout: 5 * time.Second}
+	res := doCompletionRequest(context.Background(), client, provider, cfg, "test prompt", 2, tkm, "run1-000010", logger)
+	if res.Err == nil {
+		t.Fatal("expected stream error")
+	}
+	logger.Close()
+
+	respLines := readJSONLLines(t, filepath.Join(dir, "bench_responses_run1.jsonl"))
+	if len(respLines) != 1 {
+		t.Fatalf("responses lines = %d, want 1", len(respLines))
+	}
+	var e responseLogEntry
+	if err := json.Unmarshal([]byte(respLines[0]), &e); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if e.Status != "200 OK" {
+		t.Errorf("status = %q, want 200 OK", e.Status)
+	}
+	// The partial chunk received before the connection died must be preserved.
+	if len(e.Chunks) != 1 || e.Chunks[0] != `data: {"choices":[{"delta":{"content":"Hello"}}]}` {
+		t.Errorf("chunks = %v, want the one partial chunk", e.Chunks)
+	}
+	if e.Error == "" {
+		t.Error("error must be set for mid-stream failure")
+	}
+}
+
+func TestDoCompletionRequest_LogsNoContentStream(t *testing.T) {
+	// 200 stream with [DONE] but no content -> "no output tokens received" error.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher := w.(http.Flusher)
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	logger, err := NewRequestLogger(dir, "run1")
+	if err != nil {
+		t.Fatalf("NewRequestLogger: %v", err)
+	}
+
+	tkm := testTokenizer(t)
+	provider := ProviderConfig{URL: server.URL, Model: "test-model"}
+	cfg := BenchConfig{Mode: ModeCompletion, RequestLogging: true}
+	client := &http.Client{Timeout: 5 * time.Second}
+	res := doCompletionRequest(context.Background(), client, provider, cfg, "test prompt", 2, tkm, "run1-000011", logger)
+	if res.Err == nil {
+		t.Fatal("expected no-content error")
+	}
+	logger.Close()
+
+	respLines := readJSONLLines(t, filepath.Join(dir, "bench_responses_run1.jsonl"))
+	if len(respLines) != 1 {
+		t.Fatalf("responses lines = %d, want 1", len(respLines))
+	}
+	var e responseLogEntry
+	if err := json.Unmarshal([]byte(respLines[0]), &e); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if !strings.Contains(e.Error, "no output tokens received") {
+		t.Errorf("error = %q, want 'no output tokens received'", e.Error)
+	}
+	if len(e.Chunks) != 1 || e.Chunks[0] != "data: [DONE]" {
+		t.Errorf("chunks = %v, want just [DONE]", e.Chunks)
 	}
 }
