@@ -25,8 +25,8 @@ var (
 				Padding(0, 1)
 
 	labelStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("214")).
-			Width(22)
+		Foreground(lipgloss.Color("214")).
+		Width(24)
 
 	sectionStyle = lipgloss.NewStyle().
 			Bold(true).
