@@ -152,7 +152,7 @@ func mdWriteEmbeddingSingle(sb *strings.Builder, r *EmbeddingReport) {
 	}
 	mdTable(sb, "Metric", "Value", mdSummaryRows(r.TotalRequests, r.SuccessCount, r.ErrorCount, r.ErrorCategories))
 	if !r.Valid {
-		sb.WriteString("_All requests failed — no metrics available._\n")
+		sb.WriteString("_All requests failed — no metrics available._\n\n")
 		return
 	}
 	mdTable(sb, "Metric", "Value", [][]string{
@@ -351,7 +351,7 @@ func mdWriteLogSection(sb *strings.Builder, r *CompletionReport) {
 		fmt.Fprintf(sb, "- ⚠ %d log entries dropped (disk too slow)\n", r.LogDroppedCount)
 	}
 	if r.LogError != "" {
-		fmt.Fprintf(sb, "- ⚠ log write error: %s\n", r.LogError)
+		fmt.Fprintf(sb, "- ⚠ log write error: %s\n", mdEscape(r.LogError))
 	}
 }
 

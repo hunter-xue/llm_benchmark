@@ -177,14 +177,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.errorViewport.setContent(m.results.mergedErrorCategories(), m.results.mergedErrorDetails())
 
 		if m.doneProviders >= len(m.providers) {
-			// All done — write the auto markdown report, then go to results
-			now := time.Now()
-			content := bench.MarkdownBenchReport(m.apiMode, m.testMode, m.providers, m.cfg, m.results.embeddingReports, m.results.completionReports, now)
-			name, err := bench.WriteMarkdownReport(markdownReportDir, "bench_report", content, now)
-			if err != nil {
-				m.results.reportErr = err.Error()
-			} else {
-				m.results.reportFile = name
+			// All done — write the auto markdown report, then go to results.
+			// Skip the report if the user already cancelled (esc) back to
+			// the config screen: normal completion always arrives while
+			// still on the running screen.
+			if m.screen == ScreenRunning {
+				now := time.Now()
+				content := bench.MarkdownBenchReport(m.apiMode, m.testMode, m.providers, m.cfg, m.results.embeddingReports, m.results.completionReports, now)
+				name, err := bench.WriteMarkdownReport(markdownReportDir, "bench_report", content, now)
+				if err != nil {
+					m.results.reportErr = err.Error()
+				} else {
+					m.results.reportFile = name
+				}
 			}
 			m.screen = ScreenResults
 		}
@@ -193,14 +198,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case CacheHitDoneMsg:
 		m.cacheHitResults.setReport(msg.Report)
 		m.errorViewport.setContent(m.cacheHitResults.errorCategories(), m.cacheHitResults.errorDetails())
-		now := time.Now()
-		if len(m.providers) > 0 {
-			content := bench.MarkdownCacheHitReport(m.providers[0], m.cacheHitCfg, m.cacheHitPrompt, msg.Report, now)
-			name, err := bench.WriteMarkdownReport(markdownReportDir, "cache_hit_report", content, now)
-			if err != nil {
-				m.cacheHitResults.reportErr = err.Error()
-			} else {
-				m.cacheHitResults.reportFile = name
+		// Skip the report if the user already cancelled (esc) back to the
+		// config screen: normal completion always arrives while still on
+		// the cache hit running screen.
+		if m.screen == ScreenCacheHitRunning {
+			now := time.Now()
+			if len(m.providers) > 0 {
+				content := bench.MarkdownCacheHitReport(m.providers[0], m.cacheHitCfg, m.cacheHitPrompt, msg.Report, now)
+				name, err := bench.WriteMarkdownReport(markdownReportDir, "cache_hit_report", content, now)
+				if err != nil {
+					m.cacheHitResults.reportErr = err.Error()
+				} else {
+					m.cacheHitResults.reportFile = name
+				}
 			}
 		}
 		m.screen = ScreenCacheHitResults

@@ -20,6 +20,7 @@ func TestBenchDoneMsgWritesMarkdownReport(t *testing.T) {
 	m.testMode = "single"
 	m.providers = []bench.ProviderConfig{{Name: "p", URL: "http://x", Model: "m"}}
 	m.cfg = bench.BenchConfig{Mode: bench.ModeCompletion, Concurrency: 1, TotalRequests: 1}
+	m.screen = ScreenRunning
 
 	updated, _ := m.Update(BenchDoneMsg{
 		ProviderIndex:    0,
@@ -60,6 +61,7 @@ func TestBenchDoneMsgPKWritesSingleReport(t *testing.T) {
 		{Name: "B", URL: "http://b", Model: "m"},
 	}
 	m.cfg = bench.BenchConfig{Mode: bench.ModeEmbedding, Concurrency: 1, TotalRequests: 1}
+	m.screen = ScreenRunning
 
 	r := &bench.EmbeddingReport{TotalRequests: 1, SuccessCount: 1, Valid: true}
 	updated, _ := m.Update(BenchDoneMsg{ProviderIndex: 0, EmbeddingReport: r})
@@ -95,6 +97,7 @@ func TestBenchDoneMsgReportWriteFailure(t *testing.T) {
 	m.testMode = "single"
 	m.providers = []bench.ProviderConfig{{Name: "p", URL: "http://x", Model: "m"}}
 	m.cfg = bench.BenchConfig{Mode: bench.ModeCompletion, Concurrency: 1, TotalRequests: 1}
+	m.screen = ScreenRunning
 
 	updated, _ := m.Update(BenchDoneMsg{
 		ProviderIndex:    0,
@@ -122,6 +125,7 @@ func TestCacheHitDoneMsgWritesMarkdownReport(t *testing.T) {
 	m.providers = []bench.ProviderConfig{{Name: "Provider", URL: "http://x", Model: "m"}}
 	m.cacheHitCfg = bench.CacheHitConfig{TestCount: 2}
 	m.cacheHitPrompt = "repeat me"
+	m.screen = ScreenCacheHitRunning
 
 	updated, _ := m.Update(CacheHitDoneMsg{
 		Report: &bench.CacheHitReport{TotalRequests: 2, SuccessCount: 2, Valid: true},
@@ -150,6 +154,60 @@ func TestCacheHitDoneMsgWritesMarkdownReport(t *testing.T) {
 	}
 }
 
+func TestBenchDoneMsgAfterCancelWritesNoReport(t *testing.T) {
+	dir := t.TempDir()
+	old := markdownReportDir
+	markdownReportDir = dir
+	defer func() { markdownReportDir = old }()
+
+	m := NewModel(nil)
+	m.apiMode = bench.ModeCompletion
+	m.testMode = "single"
+	m.providers = []bench.ProviderConfig{{Name: "p", URL: "http://x", Model: "m"}}
+	m.cfg = bench.BenchConfig{Mode: bench.ModeCompletion, Concurrency: 1, TotalRequests: 1}
+	m.screen = ScreenConfig // user pressed esc on the running screen before the done message arrived
+
+	updated, _ := m.Update(BenchDoneMsg{
+		ProviderIndex:    0,
+		CompletionReport: &bench.CompletionReport{TotalRequests: 1, ErrorCount: 1, Valid: false},
+	})
+	um := updated.(Model)
+
+	files, _ := os.ReadDir(dir)
+	if len(files) != 0 {
+		t.Errorf("no report file expected after cancel, got %v", files)
+	}
+	if um.results.reportFile != "" || um.results.reportErr != "" {
+		t.Error("no report status should be set after cancel")
+	}
+}
+
+func TestCacheHitDoneMsgAfterCancelWritesNoReport(t *testing.T) {
+	dir := t.TempDir()
+	old := markdownReportDir
+	markdownReportDir = dir
+	defer func() { markdownReportDir = old }()
+
+	m := NewModel(nil)
+	m.providers = []bench.ProviderConfig{{Name: "Provider", URL: "http://x", Model: "m"}}
+	m.cacheHitCfg = bench.CacheHitConfig{TestCount: 1}
+	m.cacheHitPrompt = "repeat me"
+	m.screen = ScreenCacheHitConfig // user pressed esc before the done message arrived
+
+	updated, _ := m.Update(CacheHitDoneMsg{
+		Report: &bench.CacheHitReport{TotalRequests: 1, ErrorCount: 1, Valid: false},
+	})
+	um := updated.(Model)
+
+	files, _ := os.ReadDir(dir)
+	if len(files) != 0 {
+		t.Errorf("no report file expected after cancel, got %v", files)
+	}
+	if um.cacheHitResults.reportFile != "" || um.cacheHitResults.reportErr != "" {
+		t.Error("no report status should be set after cancel")
+	}
+}
+
 func TestCacheHitDoneMsgReportWriteFailure(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "nonexistent", "sub")
 	old := markdownReportDir
@@ -160,6 +218,7 @@ func TestCacheHitDoneMsgReportWriteFailure(t *testing.T) {
 	m.providers = []bench.ProviderConfig{{Name: "Provider", URL: "http://x", Model: "m"}}
 	m.cacheHitCfg = bench.CacheHitConfig{TestCount: 1}
 	m.cacheHitPrompt = "repeat me"
+	m.screen = ScreenCacheHitRunning
 
 	updated, _ := m.Update(CacheHitDoneMsg{
 		Report: &bench.CacheHitReport{TotalRequests: 1, SuccessCount: 1, Valid: true},
