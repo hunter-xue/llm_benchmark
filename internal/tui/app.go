@@ -107,7 +107,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.errorViewport.setSize(m.width-4, m.height-4)
 		m.running.setWidth(m.width)
-		m.results.setWidth(m.width)
+		m.results.setSize(m.width, m.height)
 		m.config.setWidth(m.width)
 		m.compareConfig.setWidth(m.width)
 		m.responseCompare.setSize(m.width, m.height)
@@ -322,6 +322,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.screen = ScreenConfig
 			m.doneProviders = 0
 			m.results = newResultsModel(m.apiMode, m.testMode, providerNames(m.providers))
+			m.results.setSize(m.width, m.height)
 			return m, nil
 		case "e":
 			if m.results.hasErrors {
@@ -330,9 +331,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "ctrl+e":
-			plain := stripANSI(m.results.view(m.width, m.height))
+			plain := stripANSI(m.results.plainText())
 			return m, m.export.activate(plain)
 		}
+		// Forward unhandled keys (↑/↓/k/j/pgup/pgdn...) to the results viewport.
+		var cmd tea.Cmd
+		m.results, cmd = m.results.update(msg)
+		return m, cmd
 
 	case ScreenResponseCompareConfig:
 		switch msg.String() {
@@ -486,6 +491,7 @@ func (m Model) startRunning() (tea.Model, tea.Cmd) {
 	m.running = newRunningModel(m.providers, m.cfg)
 	m.running.setWidth(m.width)
 	m.results = newResultsModel(m.apiMode, m.testMode, providerNames(m.providers))
+	m.results.setSize(m.width, m.height)
 	m.errorViewport = newErrorViewport()
 	m.errorViewport.setSize(m.width-4, m.height-4)
 	m.showErrors = false

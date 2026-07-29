@@ -87,6 +87,9 @@ build/
 
 | 快捷键 | 说明 |
 |--------|------|
+| `↑` / `↓`（或 `j` / `k`） | 逐行滚动（内容超出终端高度时） |
+| `pgup` / `pgdn` | 向上 / 向下翻页 |
+| `ctrl+u` / `ctrl+d` | 向上 / 向下翻半页 |
 | `r` | 重新配置并再次压测 |
 | `e` | 查看错误日志（有错误时可用） |
 | `ctrl+e` | 导出结果到文本文件 |
@@ -222,6 +225,29 @@ Embedding、Chat Completion、Anthropic Messages 压测会根据用户填写的 
 | `parse_error` | 响应 JSON 解析失败 |
 | `client_error` | 本地请求构造、序列化等客户端错误 |
 | `other` | 未匹配到以上类型的错误 |
+
+---
+
+## 请求日志（Request Logging）
+
+Chat Completion 单 Provider 压测支持请求日志：在配置页将 `Request Logging` 切换为 `on`（默认 `off`）后，本次压测每个请求与响应的完整线上内容都会落盘，便于事后核对 Provider 实际收发的数据。Closed-loop 与 Open-loop 均支持；Embedding、Anthropic Messages 与 PK 模式不提供该开关。
+
+### 日志文件
+
+日志写入当前工作目录下的两个 JSONL 文件（每行一条 JSON 记录），文件名中的 `<runID>` 为本次运行启动的时间戳（`YYYYMMDD-HHMMSS`）：
+
+| 文件 | 每行字段 |
+|---|---|
+| `bench_requests_<runID>.jsonl` | `request_id`、`ts`（UTC 时间）、`method`、`url`、`headers`、`body`（实际发送的完整请求体） |
+| `bench_responses_<runID>.jsonl` | `request_id`、`ts`、`duration_ms`、`status`（HTTP 状态）、`headers`、`chunks`（原始 SSE 行）、`body`（非 200 时的错误响应片段）、`error`（请求级错误信息） |
+
+两个文件通过 `request_id`（格式 `<runID>-<6位序号>`）逐条关联；该 ID 仅用于本地日志，不会发送给 Provider。日志文件已被 `.gitignore` 忽略。
+
+### 安全与性能
+
+- **凭证脱敏**：`Authorization` 头写入前会被替换为 `Bearer ***<末4位>`，日志中不会出现完整 API Key。
+- **全异步写入**：请求 goroutine 只做非阻塞投递，序列化与磁盘 IO 由独立 writer goroutine 完成；日志记录位于计时点之外，不影响 TTFT / E2E / TPOT 测量与整体 wall time。磁盘写入跟不上时多余条目会被丢弃并计数，不会拖慢压测。
+- **结果页提示**：压测结束后结果页显示两个日志文件的路径；如有条目丢弃或写盘错误，会显示 `⚠ N log entries dropped (disk too slow)` / `⚠ log write error: ...` 警告。
 
 ---
 

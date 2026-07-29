@@ -42,7 +42,7 @@ internal/
     test_mode_select.go         -- Screen: single provider vs PK mode
     config_screen.go            -- Screen: parameter input form (textinput fields)
     running_screen.go           -- Screen: progress bars, spinner, async bench dispatch
-    results_screen.go           -- Screen: results table, PK comparison with green winner
+    results_screen.go           -- Screen: results table in scrollable viewport, PK comparison with green winner
     error_viewport.go           -- Overlay: scrollable error log (bubbles/viewport)
 ```
 

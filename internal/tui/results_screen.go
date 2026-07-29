@@ -5,7 +5,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"embedding_benchmark/internal/bench"
 )
@@ -18,6 +20,9 @@ type resultsModel struct {
 	providerNames     []string
 	hasErrors         bool
 	width             int
+	height            int
+	vp                viewport.Model
+	vpReady           bool
 }
 
 func newResultsModel(apiMode, testMode string, providerNames []string) resultsModel {
@@ -36,6 +41,7 @@ func (m *resultsModel) addEmbeddingResult(idx int, r *bench.EmbeddingReport) {
 	if r != nil && len(r.ErrorDetails) > 0 {
 		m.hasErrors = true
 	}
+	m.refreshContent()
 }
 
 func (m *resultsModel) addCompletionResult(idx int, r *bench.CompletionReport) {
@@ -45,6 +51,16 @@ func (m *resultsModel) addCompletionResult(idx int, r *bench.CompletionReport) {
 	m.completionReports[idx] = r
 	if r != nil && len(r.ErrorDetails) > 0 {
 		m.hasErrors = true
+	}
+	m.refreshContent()
+}
+
+// refreshContent pushes the current report body into the viewport. It must be
+// called on the real model whenever reports or size change — scrolling math
+// (maxYOffset) depends on the viewport's actual line count.
+func (m *resultsModel) refreshContent() {
+	if m.vpReady {
+		m.vp.SetContent(m.content())
 	}
 }
 
@@ -87,11 +103,34 @@ func (m resultsModel) mergedErrorCategories() map[string]int {
 }
 
 func (m resultsModel) update(msg tea.Msg) (resultsModel, tea.Cmd) {
-	return m, nil
+	if !m.vpReady {
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.vp, cmd = m.vp.Update(msg)
+	return m, cmd
 }
 
-func (m *resultsModel) setWidth(w int) {
+func (m *resultsModel) setSize(w, h int) {
 	m.width = w
+	m.height = h
+	vpW := w - 4
+	// Reserve lines for: title + margin (2) + scroll indicator (1) + hints + margin (2).
+	vpH := h - 5
+	if vpW < 10 {
+		vpW = 10
+	}
+	if vpH < 3 {
+		vpH = 3
+	}
+	if !m.vpReady {
+		m.vp = viewport.New(vpW, vpH)
+		m.vpReady = true
+	} else {
+		m.vp.Width = vpW
+		m.vp.Height = vpH
+	}
+	m.refreshContent()
 }
 
 type pkRow struct {
@@ -102,11 +141,17 @@ type pkRow struct {
 	higherIsBetter bool
 }
 
-func (m resultsModel) view(width, height int) string {
-	var sb strings.Builder
-	sb.WriteString(titleStyle.Render("Benchmark Results"))
-	sb.WriteString("\n\n")
+func (m resultsModel) hints() string {
+	if m.hasErrors {
+		return "↑/↓ scroll  •  r rerun  •  e errors  •  ctrl+e export  •  esc back  •  ctrl+c quit"
+	}
+	return "↑/↓ scroll  •  r rerun  •  ctrl+e export  •  esc back  •  ctrl+c quit"
+}
 
+// content renders the full report body (everything between title and hints),
+// regardless of terminal height.
+func (m resultsModel) content() string {
+	var sb strings.Builder
 	isPK := m.testMode == "pk"
 
 	if m.apiMode == bench.ModeEmbedding {
@@ -122,13 +167,31 @@ func (m resultsModel) view(width, height int) string {
 			m.renderCompletionSingle(&sb)
 		}
 	}
+	return sb.String()
+}
 
-	sb.WriteString("\n")
-	hints := "r rerun  •  ctrl+e export  •  esc back  •  ctrl+c quit"
-	if m.hasErrors {
-		hints = "r rerun  •  e errors  •  ctrl+e export  •  esc back  •  ctrl+c quit"
+// plainText returns the full untruncated view (used by ctrl+e export).
+func (m resultsModel) plainText() string {
+	return titleStyle.Render("Benchmark Results") + "\n\n" + m.content() + "\n" + helpStyle.Render(m.hints())
+}
+
+func (m resultsModel) view(width, height int) string {
+	if !m.vpReady {
+		// Viewport not initialized yet (e.g. before first WindowSizeMsg):
+		// fall back to the unclipped layout.
+		return m.plainText()
 	}
-	sb.WriteString(helpStyle.Render(hints))
+
+	var sb strings.Builder
+	sb.WriteString(titleStyle.Render("Benchmark Results"))
+	sb.WriteString("\n")
+	scrollPct := dimStyle.Render(fmt.Sprintf("  %3.f%%", m.vp.ScrollPercent()*100))
+	header := strings.Repeat("─", maxInt(0, m.vp.Width-lipgloss.Width(scrollPct))) + scrollPct
+	sb.WriteString(dimStyle.Render(header))
+	sb.WriteString("\n")
+	sb.WriteString(m.vp.View())
+	sb.WriteString("\n")
+	sb.WriteString(helpStyle.Render(m.hints()))
 	return sb.String()
 }
 
