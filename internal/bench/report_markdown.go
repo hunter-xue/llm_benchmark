@@ -261,7 +261,7 @@ func mdWriteCompletionSingle(sb *strings.Builder, r *CompletionReport) {
 	}
 	mdTable(sb, "Metric", "Value", mdSummaryRows(r.TotalRequests, r.SuccessCount, r.ErrorCount, r.ErrorCategories))
 	if !r.Valid {
-		sb.WriteString("_All requests failed — no metrics available._\n")
+		sb.WriteString("_All requests failed — no metrics available._\n\n")
 		mdWriteLogSection(sb, r)
 		return
 	}
@@ -353,8 +353,212 @@ func mdWriteLogSection(sb *strings.Builder, r *CompletionReport) {
 	}
 }
 
-// Temporary stubs — implemented in later tasks.
-func mdWriteEmbeddingPK(sb *strings.Builder, providers []ProviderConfig, reports []*EmbeddingReport) {
+// --- PK results ---
+
+type mdPKRow struct {
+	metric     string
+	valA, valB string
+	winner     int // 0 = A wins, 1 = B wins, -1 = tie/na
 }
+
+type mdMetricDef struct {
+	metric         string
+	valA, valB     float64
+	format         func(float64) string
+	higherIsBetter bool
+}
+
+func mdPKMetricRows(defs []mdMetricDef) []mdPKRow {
+	rows := make([]mdPKRow, 0, len(defs))
+	for _, d := range defs {
+		rows = append(rows, mdPKRow{
+			metric: d.metric,
+			valA:   d.format(d.valA),
+			valB:   d.format(d.valB),
+			winner: mdWinner(d.valA, d.valB, d.higherIsBetter),
+		})
+	}
+	return rows
+}
+
+func mdWinner(a, b float64, higherIsBetter bool) int {
+	if a == b {
+		return -1
+	}
+	if higherIsBetter {
+		if a > b {
+			return 0
+		}
+		return 1
+	}
+	if a < b {
+		return 0
+	}
+	return 1
+}
+
+func mdWriteEmbeddingPK(sb *strings.Builder, providers []ProviderConfig, reports []*EmbeddingReport) {
+	var a, b *EmbeddingReport
+	if len(reports) > 0 {
+		a = reports[0]
+	}
+	if len(reports) > 1 {
+		b = reports[1]
+	}
+	nameA, nameB := mdPKNames(providers)
+	aValid := a != nil && a.Valid
+	bValid := b != nil && b.Valid
+
+	rows := []mdPKRow{
+		{metric: "Success / Total", valA: mdEmbeddingSuccessTotal(a), valB: mdEmbeddingSuccessTotal(b), winner: -1},
+		{metric: "Error Categories", valA: mdSummarizeErrorCategories(embeddingCategories(a)), valB: mdSummarizeErrorCategories(embeddingCategories(b)), winner: -1},
+	}
+	if aValid && bValid {
+		rows = append(rows, mdPKMetricRows([]mdMetricDef{
+			{"RPS", a.RPS, b.RPS, func(v float64) string { return mdFmtF(v, 2) }, true},
+			{"Input TPS", a.InputTPS, b.InputTPS, func(v float64) string { return mdFmtF(v, 1) }, true},
+			{"Input TPM", a.InputTPM, b.InputTPM, func(v float64) string { return mdFmtF(v, 0) }, true},
+			{"Latency Avg", a.LatencyAvg, b.LatencyAvg, mdFmtMs, false},
+			{"Latency P50", a.LatencyP50, b.LatencyP50, mdFmtMs, false},
+			{"Latency P90", a.LatencyP90, b.LatencyP90, mdFmtMs, false},
+			{"Latency P99", a.LatencyP99, b.LatencyP99, mdFmtMs, false},
+		})...)
+	}
+	mdPKTable(sb, nameA, nameB, rows)
+	mdPKFailureNotes(sb, nameA, aValid, nameB, bValid)
+}
+
 func mdWriteCompletionPK(sb *strings.Builder, providers []ProviderConfig, reports []*CompletionReport) {
+	var a, b *CompletionReport
+	if len(reports) > 0 {
+		a = reports[0]
+	}
+	if len(reports) > 1 {
+		b = reports[1]
+	}
+	nameA, nameB := mdPKNames(providers)
+	aValid := a != nil && a.Valid
+	bValid := b != nil && b.Valid
+
+	rows := []mdPKRow{
+		{metric: "Success / Total", valA: mdCompletionSuccessTotal(a), valB: mdCompletionSuccessTotal(b), winner: -1},
+		{metric: "Error Categories", valA: mdSummarizeErrorCategories(completionCategories(a)), valB: mdSummarizeErrorCategories(completionCategories(b)), winner: -1},
+		{metric: "API Prompt Tokens", valA: mdPKAPIUsageTokens(a, func(r *CompletionReport) int { return r.APIPromptTokens }), valB: mdPKAPIUsageTokens(b, func(r *CompletionReport) int { return r.APIPromptTokens }), winner: -1},
+		{metric: "API Completion Tokens", valA: mdPKAPIUsageTokens(a, func(r *CompletionReport) int { return r.APICompletionTokens }), valB: mdPKAPIUsageTokens(b, func(r *CompletionReport) int { return r.APICompletionTokens }), winner: -1},
+		{metric: "API Total Tokens", valA: mdPKAPIUsageTokens(a, func(r *CompletionReport) int { return r.APITotalTokens }), valB: mdPKAPIUsageTokens(b, func(r *CompletionReport) int { return r.APITotalTokens }), winner: -1},
+		{metric: "API Usage Samples", valA: mdPKAPIUsageSamples(a), valB: mdPKAPIUsageSamples(b), winner: -1},
+	}
+	if aValid && bValid {
+		defs := []mdMetricDef{
+			{"RPS", a.RPS, b.RPS, func(v float64) string { return mdFmtF(v, 2) }, true},
+			{"Input TPS", a.InputTPS, b.InputTPS, func(v float64) string { return mdFmtF(v, 1) }, true},
+			{"Output TPS", a.OutputTPS, b.OutputTPS, func(v float64) string { return mdFmtF(v, 1) }, true},
+			{"Input TPM", a.InputTPM, b.InputTPM, func(v float64) string { return mdFmtF(v, 0) }, true},
+			{"Output TPM", a.OutputTPM, b.OutputTPM, func(v float64) string { return mdFmtF(v, 0) }, true},
+			{"TTFT Avg", a.TTFTAvg, b.TTFTAvg, mdFmtMs, false},
+			{"TTFT P50", a.TTFTp50, b.TTFTp50, mdFmtMs, false},
+			{"TTFT P90", a.TTFTp90, b.TTFTp90, mdFmtMs, false},
+			{"TTFT P99", a.TTFTp99, b.TTFTp99, mdFmtMs, false},
+			{"TPOT Avg", a.TPOTAvg, b.TPOTAvg, mdFmtMsPerTok, false},
+			{"TPOT P50", a.TPOTp50, b.TPOTp50, mdFmtMsPerTok, false},
+			{"TPOT P90", a.TPOTp90, b.TPOTp90, mdFmtMsPerTok, false},
+			{"TPOT P99", a.TPOTp99, b.TPOTp99, mdFmtMsPerTok, false},
+			{"E2E Avg", a.E2EAvg, b.E2EAvg, mdFmtMs, false},
+			{"E2E P50", a.E2Ep50, b.E2Ep50, mdFmtMs, false},
+			{"E2E P90", a.E2Ep90, b.E2Ep90, mdFmtMs, false},
+			{"E2E P99", a.E2Ep99, b.E2Ep99, mdFmtMs, false},
+		}
+		if a.QueueTimeAvg > 0 || b.QueueTimeAvg > 0 {
+			defs = append(defs,
+				mdMetricDef{"Queue Time Avg", a.QueueTimeAvg, b.QueueTimeAvg, mdFmtMs, false},
+				mdMetricDef{"Queue Time P50", a.QueueTimeP50, b.QueueTimeP50, mdFmtMs, false},
+				mdMetricDef{"Queue Time P90", a.QueueTimeP90, b.QueueTimeP90, mdFmtMs, false},
+				mdMetricDef{"Queue Time P99", a.QueueTimeP99, b.QueueTimeP99, mdFmtMs, false},
+			)
+		}
+		rows = append(rows, mdPKMetricRows(defs)...)
+	}
+	mdPKTable(sb, nameA, nameB, rows)
+	mdPKFailureNotes(sb, nameA, aValid, nameB, bValid)
+}
+
+func mdPKNames(providers []ProviderConfig) (string, string) {
+	nameA, nameB := "Provider A", "Provider B"
+	if len(providers) > 0 && providers[0].Name != "" {
+		nameA = providers[0].Name
+	}
+	if len(providers) > 1 && providers[1].Name != "" {
+		nameB = providers[1].Name
+	}
+	return nameA, nameB
+}
+
+func mdEmbeddingSuccessTotal(r *EmbeddingReport) string {
+	if r == nil {
+		return ""
+	}
+	return fmt.Sprintf("%d / %d", r.SuccessCount, r.TotalRequests)
+}
+
+func mdCompletionSuccessTotal(r *CompletionReport) string {
+	if r == nil {
+		return ""
+	}
+	return fmt.Sprintf("%d / %d", r.SuccessCount, r.TotalRequests)
+}
+
+func embeddingCategories(r *EmbeddingReport) map[string]int {
+	if r == nil {
+		return nil
+	}
+	return r.ErrorCategories
+}
+
+func completionCategories(r *CompletionReport) map[string]int {
+	if r == nil {
+		return nil
+	}
+	return r.ErrorCategories
+}
+
+func mdPKAPIUsageTokens(r *CompletionReport, value func(*CompletionReport) int) string {
+	if r == nil || r.APIUsageCount == 0 {
+		return "N/A"
+	}
+	return fmt.Sprintf("%d", value(r))
+}
+
+func mdPKAPIUsageSamples(r *CompletionReport) string {
+	if r == nil || r.SuccessCount == 0 {
+		return "N/A"
+	}
+	if r.APIUsageCount == 0 {
+		return fmt.Sprintf("N/A / %d", r.SuccessCount)
+	}
+	return fmt.Sprintf("%d / %d", r.APIUsageCount, r.SuccessCount)
+}
+
+func mdPKTable(sb *strings.Builder, nameA, nameB string, rows []mdPKRow) {
+	fmt.Fprintf(sb, "| Metric | %s | %s |\n", mdEscape(nameA), mdEscape(nameB))
+	sb.WriteString("|---|---|---|\n")
+	for _, r := range rows {
+		va, vb := mdEscape(r.valA), mdEscape(r.valB)
+		if r.winner == 0 {
+			va = "**" + va + "**"
+		}
+		if r.winner == 1 {
+			vb = "**" + vb + "**"
+		}
+		fmt.Fprintf(sb, "| %s | %s | %s |\n", mdEscape(r.metric), va, vb)
+	}
+	sb.WriteString("\n")
+}
+
+func mdPKFailureNotes(sb *strings.Builder, nameA string, aValid bool, nameB string, bValid bool) {
+	if !aValid {
+		fmt.Fprintf(sb, "_%s: all requests failed_\n", nameA)
+	}
+	if !bValid {
+		fmt.Fprintf(sb, "_%s: all requests failed_\n", nameB)
+	}
 }

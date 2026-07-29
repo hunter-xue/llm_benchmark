@@ -95,7 +95,7 @@ func TestMdEscape(t *testing.T) {
 
 func fullCompletionReportForMD() *CompletionReport {
 	return &CompletionReport{
-		TotalRequests: 100, SuccessCount: 98, ErrorCount: 2,
+		TotalRequests: 100, SuccessCount: 100, ErrorCount: 2,
 		ErrorCategories: map[string]int{"timeout": 1, "rate_limit": 1},
 		Valid:           true,
 		WallTime:        10 * time.Second,
@@ -137,7 +137,7 @@ func TestMarkdownBenchReport_CompletionSingle(t *testing.T) {
 		"| API Prompt Tokens | 49000 |",
 		"| API Completion Tokens | 12583 |",
 		"| API Total Tokens | 61583 |",
-		"| API Usage Samples | 98 / 98 |",
+		"| API Usage Samples | 98 / 100 |",
 		"| Missing API Usage | 2 |",
 		"| TTFT Avg | 100.00 ms |",
 		"| TTFT P99 | 200.00 ms |",
@@ -221,5 +221,101 @@ func TestMarkdownBenchReport_PipeEscaped(t *testing.T) {
 	md := MarkdownBenchReport(ModeEmbedding, "single", providers, cfg, []*EmbeddingReport{r}, nil, time.Now())
 	if !strings.Contains(md, `{"a":"b\|c"}`) {
 		t.Error("pipe characters in values must be escaped")
+	}
+}
+
+func TestMarkdownBenchReport_CompletionPK(t *testing.T) {
+	providers := []ProviderConfig{
+		{Name: "Alpha", URL: "http://a", Model: "m1", APIKey: "sk-aaaa1111"},
+		{Name: "Beta", URL: "http://b", Model: "m2", APIKey: "sk-bbbb2222"},
+	}
+	cfg := BenchConfig{Mode: ModeCompletion, Concurrency: 4, TotalRequests: 20, TargetTokens: 100, MaxOutputTokens: 64, LoadModel: LoadModelClosedLoop}
+	a := &CompletionReport{
+		TotalRequests: 20, SuccessCount: 20, Valid: true,
+		RPS: 9.8, InputTPS: 980, OutputTPS: 300, InputTPM: 58800, OutputTPM: 18000,
+		APIPromptTokens: 2000, APICompletionTokens: 600, APITotalTokens: 2600, APIUsageCount: 20,
+		TTFTAvg: 100, TTFTp50: 90, TTFTp90: 150, TTFTp99: 200,
+		TPOTAvg: 10, TPOTp50: 9, TPOTp90: 15, TPOTp99: 20,
+		E2EAvg: 1000, E2Ep50: 900, E2Ep90: 1500, E2Ep99: 2000,
+	}
+	b := &CompletionReport{
+		TotalRequests: 20, SuccessCount: 18, ErrorCount: 2, Valid: true,
+		RPS: 8.1, InputTPS: 810, OutputTPS: 320, InputTPM: 48600, OutputTPM: 19200,
+		APIPromptTokens: 1800, APICompletionTokens: 640, APITotalTokens: 2440, APIUsageCount: 18,
+		TTFTAvg: 120, TTFTp50: 110, TTFTp90: 170, TTFTp99: 220,
+		TPOTAvg: 9, TPOTp50: 8, TPOTp90: 14, TPOTp99: 19,
+		E2EAvg: 1100, E2Ep50: 1000, E2Ep90: 1600, E2Ep99: 2100,
+	}
+	md := MarkdownBenchReport(ModeCompletion, "pk", providers, cfg, nil, []*CompletionReport{a, b}, time.Now())
+
+	for _, want := range []string{
+		"# Benchmark Report — Chat Completion (PK)",
+		"| Parameter | Alpha | Beta |",
+		"| URL | http://a | http://b |",
+		"| API Key | ***1111 | ***2222 |",
+		"| Metric | Alpha | Beta |",
+		"| Success / Total | 20 / 20 | 18 / 20 |",
+		"| API Prompt Tokens | 2000 | 1800 |",
+		"| API Usage Samples | 20 / 20 | 18 / 18 |",
+		"| RPS | **9.80** | 8.10 |",        // higher wins → Alpha bold
+		"| Output TPS | 300.0 | **320.0** |", // Beta bold
+		"| TTFT Avg | **100.00 ms** | 120.00 ms |", // lower wins → Alpha bold
+		"| TPOT Avg | 10.00 ms/tok | **9.00 ms/tok** |",
+		"| E2E P99 | **2000.00 ms** | 2100.00 ms |",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("PK report missing %q\n--- report ---\n%s", want, md)
+		}
+	}
+	// Request Logging toggle does not exist in PK mode
+	if strings.Contains(md, "Request Logging") {
+		t.Error("PK report should not contain Request Logging row")
+	}
+	// no queue time data → no queue rows
+	if strings.Contains(md, "Queue Time") {
+		t.Error("PK report should not contain Queue Time rows when both providers have none")
+	}
+}
+
+func TestMarkdownBenchReport_EmbeddingPK(t *testing.T) {
+	providers := []ProviderConfig{
+		{Name: "A", URL: "http://a", Model: "m1"},
+		{Name: "B", URL: "http://b", Model: "m2"},
+	}
+	cfg := BenchConfig{Mode: ModeEmbedding, Concurrency: 2, TotalRequests: 10, TargetTokens: 50}
+	a := &EmbeddingReport{TotalRequests: 10, SuccessCount: 10, Valid: true, RPS: 5, LatencyAvg: 100}
+	b := &EmbeddingReport{TotalRequests: 10, SuccessCount: 10, Valid: true, RPS: 6, LatencyAvg: 120}
+	md := MarkdownBenchReport(ModeEmbedding, "pk", providers, cfg, []*EmbeddingReport{a, b}, nil, time.Now())
+	for _, want := range []string{
+		"# Benchmark Report — Embedding (PK)",
+		"| RPS | 5.00 | **6.00** |",
+		"| Latency Avg | **100.00 ms** | 120.00 ms |",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("embedding PK report missing %q", want)
+		}
+	}
+}
+
+func TestMarkdownBenchReport_PKInvalidProvider(t *testing.T) {
+	providers := []ProviderConfig{
+		{Name: "A", URL: "http://a", Model: "m1"},
+		{Name: "B", URL: "http://b", Model: "m2"},
+	}
+	cfg := BenchConfig{Mode: ModeCompletion, Concurrency: 2, TotalRequests: 10, LoadModel: LoadModelClosedLoop}
+	a := &CompletionReport{TotalRequests: 10, SuccessCount: 10, Valid: true, RPS: 5, APIUsageCount: 0}
+	b := &CompletionReport{TotalRequests: 10, ErrorCount: 10, Valid: false}
+	md := MarkdownBenchReport(ModeCompletion, "pk", providers, cfg, nil, []*CompletionReport{a, b}, time.Now())
+	if !strings.Contains(md, "_B: all requests failed_") {
+		t.Error("expected failure note for provider B")
+	}
+	if !strings.Contains(md, "| Success / Total | 10 / 10 | 0 / 10 |") {
+		t.Error("Success / Total row must still show both providers")
+	}
+	if strings.Contains(md, "| RPS |") {
+		t.Error("metric rows must be omitted when a provider is invalid")
+	}
+	if !strings.Contains(md, "| API Prompt Tokens | N/A | N/A |") {
+		t.Error("API usage rows render N/A when no usage data")
 	}
 }
