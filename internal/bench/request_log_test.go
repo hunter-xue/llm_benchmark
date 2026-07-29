@@ -647,6 +647,43 @@ func TestRunOpenLoopCompletionBench_LogsEndToEnd(t *testing.T) {
 	if len(ids) != 3 {
 		t.Errorf("distinct response request IDs = %d, want 3", len(ids))
 	}
+	if report.LogDroppedCount != 0 {
+		t.Errorf("LogDroppedCount = %d, want 0", report.LogDroppedCount)
+	}
+	if report.LogError != "" {
+		t.Errorf("LogError = %q, want empty", report.LogError)
+	}
+
+	// Every request ID has exactly one request entry and one response entry.
+	reqIDs := make(map[string]bool)
+	for _, line := range reqLines {
+		var e requestLogEntry
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			t.Fatalf("invalid request JSON: %v", err)
+		}
+		if !requestIDPattern.MatchString(e.RequestID) {
+			t.Errorf("request_id %q does not match format YYYYMMDD-HHMMSS-NNNNNN", e.RequestID)
+		}
+		reqIDs[e.RequestID] = false
+	}
+	if len(reqIDs) != 3 {
+		t.Fatalf("distinct request IDs = %d, want 3", len(reqIDs))
+	}
+	for _, line := range respLines {
+		var e responseLogEntry
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			t.Fatalf("invalid response JSON: %v", err)
+		}
+		if _, ok := reqIDs[e.RequestID]; !ok {
+			t.Errorf("response request_id %q has no request entry", e.RequestID)
+		}
+		reqIDs[e.RequestID] = true
+	}
+	for id, matched := range reqIDs {
+		if !matched {
+			t.Errorf("request %q has no response entry", id)
+		}
+	}
 }
 
 func TestRunCompletionBench_LoggingWithCancellation(t *testing.T) {
@@ -680,6 +717,70 @@ func TestRunCompletionBench_LoggingWithCancellation(t *testing.T) {
 		cancel()
 	}()
 	report := RunCompletionBench(ctx, provider, cfg, "test prompt", 2, tkm, nil)
+
+	// Must not hang, must close the logger cleanly, and every logged request
+	// must have exactly one logged response (1:1 correlation even on cancel).
+	reqLines := readJSONLLines(t, report.LogRequestsFile)
+	respLines := readJSONLLines(t, report.LogResponsesFile)
+	if len(reqLines) == 0 {
+		t.Fatal("expected at least one logged request")
+	}
+	if len(reqLines) != len(respLines) {
+		t.Fatalf("request/response lines = %d/%d, want equal", len(reqLines), len(respLines))
+	}
+	respIDs := make(map[string]bool)
+	for _, line := range respLines {
+		var e responseLogEntry
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			t.Fatalf("invalid response JSON: %v", err)
+		}
+		respIDs[e.RequestID] = true
+	}
+	for _, line := range reqLines {
+		var e requestLogEntry
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			t.Fatalf("invalid request JSON: %v", err)
+		}
+		if !respIDs[e.RequestID] {
+			t.Errorf("request %q has no response entry", e.RequestID)
+		}
+	}
+}
+
+func TestRunOpenLoopCompletionBench_LoggingWithCancellation(t *testing.T) {
+	// Server streams one chunk then hangs, so cancellation hits mid-run.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher := w.(http.Flusher)
+		fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\n")
+		flusher.Flush()
+		<-r.Context().Done() // hang until client cancels
+	}))
+	defer server.Close()
+
+	old := requestLogDir
+	requestLogDir = t.TempDir()
+	defer func() { requestLogDir = old }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	tkm := testTokenizer(t)
+	provider := ProviderConfig{URL: server.URL, Model: "test-model"}
+	cfg := BenchConfig{
+		Mode:                  ModeCompletion,
+		LoadModel:             LoadModelOpenLoop,
+		RequestRate:           100,
+		MaxInFlight:           2,
+		Concurrency:           2,
+		TotalRequests:         5,
+		TTFTIncludesReasoning: true,
+		RequestLogging:        true,
+	}
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		cancel()
+	}()
+	report := RunOpenLoopCompletionBench(ctx, provider, cfg, "test prompt", 2, tkm, nil)
 
 	// Must not hang, must close the logger cleanly, and every logged request
 	// must have exactly one logged response (1:1 correlation even on cancel).
