@@ -2,6 +2,8 @@ package bench
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -642,4 +644,14 @@ func MarkdownCacheHitReport(provider ProviderConfig, cfg CacheHitConfig, userPro
 			res.Index, mdFmtMs(float64(res.Latency.Milliseconds())), res.PromptTokens, cached, hitRate)
 	}
 	return sb.String()
+}
+
+// WriteMarkdownReport writes content to dir/<prefix>_YYYYMMDD_HHMMSS.md
+// (timestamp from now, local time) and returns the file name (not the full path).
+func WriteMarkdownReport(dir, prefix, content string, now time.Time) (string, error) {
+	name := fmt.Sprintf("%s_%s.md", prefix, now.Format("20060102_150405"))
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
+		return "", err
+	}
+	return name, nil
 }

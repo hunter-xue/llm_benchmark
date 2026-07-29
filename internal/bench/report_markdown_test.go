@@ -2,6 +2,8 @@ package bench
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -424,5 +426,68 @@ func TestMarkdownCacheHitReportAllFailed(t *testing.T) {
 	}
 	if !strings.Contains(md, "| 1 | error: boom | | | |") {
 		t.Error("per-request table must still be present")
+	}
+}
+
+func TestMarkdownCacheHitReportMissingAndZeroPrompt(t *testing.T) {
+	provider := ProviderConfig{Name: "Provider", URL: "http://x", Model: "m"}
+	cfg := CacheHitConfig{TestCount: 2, Interval: 5 * time.Second}
+	r := &CacheHitReport{
+		TotalRequests: 2, SuccessCount: 2, Valid: true,
+		MissingUsageCount: 1, MissingCachedCount: 1,
+		Results: []CacheHitResult{
+			{Index: 1, Latency: 100 * time.Millisecond, PromptTokens: 0, CachedTokens: 0, HasCachedTokens: true},
+		},
+	}
+	md := MarkdownCacheHitReport(provider, cfg, "p", r, time.Now())
+	for _, want := range []string{
+		"| Missing Usage | 1 |",
+		"| Missing Cached Field | 1 |",
+		"| Interval | 5s |",
+		"| 1 | 100.00 ms | 0 | 0 | N/A |", // PromptTokens==0 → hit rate N/A (division guard)
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("report missing %q\n--- report ---\n%s", want, md)
+		}
+	}
+}
+
+func TestMarkdownBenchReport_PKFailureNotesEscaped(t *testing.T) {
+	providers := []ProviderConfig{
+		{Name: "A|B\nev1l", URL: "http://a", Model: "m"},
+		{Name: "B", URL: "http://b", Model: "m"},
+	}
+	cfg := BenchConfig{Mode: ModeCompletion, Concurrency: 1, TotalRequests: 1}
+	a := &CompletionReport{TotalRequests: 1, ErrorCount: 1, Valid: false}
+	b := &CompletionReport{TotalRequests: 1, SuccessCount: 1, Valid: true}
+	md := MarkdownBenchReport(ModeCompletion, "pk", providers, cfg, nil, []*CompletionReport{a, b}, time.Now())
+	if !strings.Contains(md, "_A\\|B ev1l: all requests failed_\n") {
+		t.Errorf("provider name in failure note must be escaped and single-line\n--- report ---\n%s", md)
+	}
+}
+
+func TestWriteMarkdownReport(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 7, 29, 15, 30, 45, 0, time.Local)
+	name, err := WriteMarkdownReport(dir, "bench_report", "# hello\n", now)
+	if err != nil {
+		t.Fatalf("WriteMarkdownReport: %v", err)
+	}
+	if name != "bench_report_20260729_153045.md" {
+		t.Errorf("unexpected file name %q", name)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(data) != "# hello\n" {
+		t.Errorf("file content = %q", string(data))
+	}
+}
+
+func TestWriteMarkdownReportBadDir(t *testing.T) {
+	_, err := WriteMarkdownReport(filepath.Join(t.TempDir(), "nonexistent", "sub"), "bench_report", "x", time.Now())
+	if err == nil {
+		t.Error("expected error for nonexistent directory")
 	}
 }
