@@ -225,6 +225,50 @@ Embedding、Chat Completion、Anthropic Messages 压测会根据用户填写的 
 
 ---
 
+## 思考（Reasoning / Thinking）模型注意事项
+
+### Max Output Tokens 与思考共享预算 —— 以 kimi-k2.6 为例
+
+kimi-k2.6 **默认开启深度思考**（`thinking` 参数默认值 `{"type": "enabled"}`），模型会先输出推理过程（`reasoning_content`），再输出正文。此时 **`max_tokens` 是思考与正文共用的总预算**：如果 Max Output Tokens 设置过小，思考可能烧光全部预算，正文一个 token 都产不出，流最终以 `finish_reason: "length"` 被截断。
+
+这种情况下本工具会把该请求计为错误（`empty_output`），错误日志中显示：
+
+```
+only reasoning tokens received, no answer content (thinking exhausted max_tokens?)
+```
+
+响应 `usage` 里的 `completion_tokens_details.reasoning_tokens` 可以看出预算被思考占用的比例，例如：
+
+```json
+"completion_tokens": 256, "completion_tokens_details": {"reasoning_tokens": 255}
+```
+
+表示 256 个输出 token 中 255 个是思考，正文为 0。
+
+应对方式（二选一）：
+
+1. **调大 Max Output Tokens**：思考模型需要"思考预算 + 回答预算"，建议 ≥1024
+2. **关闭思考**：在 Custom Params 中传入 `{"thinking": {"type": "disabled"}}`
+
+### 不同模型的参数语义不同，请查阅官方文档
+
+max_tokens 语义、思考开关与思考深度的参数设置**因模型 / 供应商而异**，例如：
+
+- **输出上限字段名不同**：OpenAI 兼容 API 多用 `max_tokens`；Kimi 已弃用 `max_tokens`，推荐 `max_completion_tokens`；Anthropic Messages 的 `max_tokens` 为必填
+- **思考开关参数不同**：Kimi K2.x 用 `{"thinking": {"type": "enabled|disabled"}}`，Kimi K3 用顶层 `reasoning_effort`，Qwen 用 `enable_thinking`，其他供应商另有字段，且**默认是否开启思考各不相同**
+- **思考深度控制不同**：有的支持档位（如 `reasoning_effort: low/high/max`），有的支持 token 预算（如 Anthropic 的 `thinking.budget_tokens`），有的不支持调节
+- **采样参数可能被固定**：部分模型在思考模式下固定温度（如 kimi-k2.6 思考模式固定 temperature 1.0），显式传入其他值会报错
+
+本工具不针对具体模型做适配。使用前请查阅**具体模型或 token 供应商的官方文档**，确认上述参数的语义与默认值，然后在配置界面的 **Custom Params** 中以 JSON 形式自行传入（Custom Params 会合并进每个请求体并覆盖同名字段），例如：
+
+```json
+{"thinking": {"type": "disabled"}, "max_completion_tokens": 1024}
+```
+
+> 工具的 **TTFT Includes Reasoning** 开关只影响 TTFT 计时点（首 reasoning token 是否停表），与供应商侧的思考开关无关；reasoning/thinking 内容永远不计入输出 token 统计。
+
+---
+
 ## 注意事项
 
 - 默认 BPE 词表已嵌入可执行文件，工具不会联网下载；可通过 `--bpe-file` 指定外部文件覆盖它
