@@ -172,3 +172,23 @@ func TestResultsViewShowsReportError(t *testing.T) {
 		t.Error("results view should show the report write error")
 	}
 }
+
+func TestCacheHitResultsViewShowsReportStatus(t *testing.T) {
+	m := newCacheHitResultsModel()
+	m.setReport(&bench.CacheHitReport{TotalRequests: 1, SuccessCount: 1, Valid: true})
+	m.reportFile = "cache_hit_report_20260729_153045.md"
+	out := m.view(100, 24)
+	if !strings.Contains(out, "Report saved: cache_hit_report_20260729_153045.md") {
+		t.Error("cache hit results view should show the saved report file name")
+	}
+}
+
+func TestCacheHitResultsViewShowsReportStatusWhenAllFailed(t *testing.T) {
+	m := newCacheHitResultsModel()
+	m.setReport(&bench.CacheHitReport{TotalRequests: 1, ErrorCount: 1, Valid: false})
+	m.reportFile = "cache_hit_report_20260729_153045.md"
+	out := m.view(100, 24)
+	if !strings.Contains(out, "Report saved: cache_hit_report_20260729_153045.md") {
+		t.Error("status line must also appear on the all-failed view path")
+	}
+}

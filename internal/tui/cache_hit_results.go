@@ -8,8 +8,10 @@ import (
 )
 
 type cacheHitResultsModel struct {
-	report *bench.CacheHitReport
-	width  int
+	report     *bench.CacheHitReport
+	width      int
+	reportFile string // auto-written markdown report file name ("" = not written)
+	reportErr  string // markdown report write error, if any
 }
 
 func newCacheHitResultsModel() cacheHitResultsModel {
@@ -71,6 +73,7 @@ func (m cacheHitResultsModel) view(width, height int) string {
 		sb.WriteString(dimStyle.Render("  Press 'e' to view error details."))
 		sb.WriteString("\n")
 		sb.WriteString("\n")
+		renderReportStatus(&sb, m.reportFile, m.reportErr)
 		sb.WriteString(helpStyle.Render("r rerun  •  e errors  •  ctrl+e export  •  esc config  •  ctrl+c quit"))
 		return sb.String()
 	}
@@ -119,6 +122,7 @@ func (m cacheHitResultsModel) view(width, height int) string {
 	}
 
 	sb.WriteString("\n")
+	renderReportStatus(&sb, m.reportFile, m.reportErr)
 	hints := "r rerun  •  ctrl+e export  •  esc config  •  ctrl+c quit"
 	if m.hasErrors() {
 		hints = "r rerun  •  e errors  •  ctrl+e export  •  esc config  •  ctrl+c quit"

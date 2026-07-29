@@ -82,6 +82,8 @@ type Model struct {
 	// Prompt cache hit test flow
 	cacheHitConfig  cacheHitConfigModel
 	cacheHitResults cacheHitResultsModel
+	cacheHitCfg     bench.CacheHitConfig // stored for the markdown report
+	cacheHitPrompt  string               // stored for the markdown report
 
 	// Export overlay
 	export exportModel
@@ -191,6 +193,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case CacheHitDoneMsg:
 		m.cacheHitResults.setReport(msg.Report)
 		m.errorViewport.setContent(m.cacheHitResults.errorCategories(), m.cacheHitResults.errorDetails())
+		now := time.Now()
+		if len(m.providers) > 0 {
+			content := bench.MarkdownCacheHitReport(m.providers[0], m.cacheHitCfg, m.cacheHitPrompt, msg.Report, now)
+			name, err := bench.WriteMarkdownReport(markdownReportDir, "cache_hit_report", content, now)
+			if err != nil {
+				m.cacheHitResults.reportErr = err.Error()
+			} else {
+				m.cacheHitResults.reportFile = name
+			}
+		}
 		m.screen = ScreenCacheHitResults
 		return m, nil
 
@@ -518,6 +530,8 @@ func (m Model) startRunning() (tea.Model, tea.Cmd) {
 
 func (m Model) startCacheHitRunning(provider bench.ProviderConfig, cfg bench.CacheHitConfig, userPrompt string) (tea.Model, tea.Cmd) {
 	m.providers = []bench.ProviderConfig{provider}
+	m.cacheHitCfg = cfg
+	m.cacheHitPrompt = userPrompt
 	m.running = newRunningModel(m.providers, bench.BenchConfig{
 		Mode:          bench.ModeCompletion,
 		TotalRequests: cfg.TestCount,
