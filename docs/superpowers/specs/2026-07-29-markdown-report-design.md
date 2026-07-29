@@ -28,7 +28,7 @@ Today results only live in the TUI. The existing `ctrl+e` export dumps ANSI-stri
 - `app.go` `BenchDoneMsg` handler: when `doneProviders >= len(m.providers)` (the moment the UI transitions to `ScreenResults`), generate and write the report once, using the final accumulated reports.
 - `app.go` `CacheHitDoneMsg` handler: generate and write once.
 - The write is a small synchronous one-shot file write in the Update handler. It happens after the benchmark has fully finished, so it cannot affect any measured metric.
-- If the user cancels a run mid-way (`esc` on the running screen), not all providers report done, so no file is written.
+- If the user cancels a run mid-way (`esc` on the running screen), no file is written: runners still send their done message after cancellation, so the write is gated on the current screen (`ScreenRunning` / `ScreenCacheHitRunning`) — a stale done message arriving after `esc` finds the user on a config screen and skips the write.
 - Write failure is recorded and shown as a warning line on the results screen; result display is unaffected.
 
 ## Markdown Generation (`internal/bench/report_markdown.go`)
