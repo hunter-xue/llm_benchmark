@@ -22,6 +22,7 @@ func TestClassifyError(t *testing.T) {
 		{"timeout text", errors.New("Post \"http://example.test\": i/o timeout"), ErrorCategoryTimeout},
 		{"connection", &url.Error{Op: "Post", URL: "http://127.0.0.1", Err: errors.New("connect: connection refused")}, ErrorCategoryConnection},
 		{"empty output", errors.New("no output tokens received"), ErrorCategoryEmptyOutput},
+		{"reasoning only output", errors.New("only reasoning tokens received, no answer content (thinking exhausted max_tokens?)"), ErrorCategoryEmptyOutput},
 		{"stream error", errors.New("failed to read stream: unexpected EOF"), ErrorCategoryStream},
 		{"parse error", errors.New("failed to parse response JSON: invalid character"), ErrorCategoryParse},
 		{"client error", errors.New("failed to create request: missing protocol scheme"), ErrorCategoryClient},

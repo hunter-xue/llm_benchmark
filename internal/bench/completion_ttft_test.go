@@ -124,8 +124,54 @@ func TestDoCompletionRequest_ReasoningOnlyStreamIsError(t *testing.T) {
 	if res.Err == nil {
 		t.Fatal("reasoning-only stream should be an error")
 	}
+	if !strings.Contains(res.Err.Error(), "only reasoning tokens received") {
+		t.Errorf("error = %q, want it to mention %q", res.Err.Error(), "only reasoning tokens received")
+	}
+}
+
+func TestDoCompletionRequest_ReasoningOnlyStreamToggleOffIsError(t *testing.T) {
+	server := reasoningOnlyServer(t)
+	defer server.Close()
+
+	// Even when the TTFT toggle ignores reasoning for timing, a reasoning-only
+	// stream must still be reported as reasoning-only (not "no output tokens").
+	res := doSingleCompletion(t, server, false)
+	if res.Err == nil {
+		t.Fatal("reasoning-only stream should be an error")
+	}
+	if !strings.Contains(res.Err.Error(), "only reasoning tokens received") {
+		t.Errorf("error = %q, want it to mention %q", res.Err.Error(), "only reasoning tokens received")
+	}
+}
+
+// emptyStreamServer emits one role-only delta and [DONE] — neither content
+// nor reasoning.
+func emptyStreamServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher := w.(http.Flusher)
+		fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n")
+		flusher.Flush()
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	}))
+}
+
+func TestDoCompletionRequest_EmptyStreamIsError(t *testing.T) {
+	server := emptyStreamServer(t)
+	defer server.Close()
+
+	res := doSingleCompletion(t, server, true)
+	if res.Err == nil {
+		t.Fatal("empty stream should be an error")
+	}
 	if !strings.Contains(res.Err.Error(), "no output tokens received") {
 		t.Errorf("error = %q, want it to mention %q", res.Err.Error(), "no output tokens received")
+	}
+	if strings.Contains(res.Err.Error(), "only reasoning") {
+		t.Errorf("error = %q, should not be the reasoning-only message for an empty stream", res.Err.Error())
 	}
 }
 
@@ -265,8 +311,8 @@ func TestDoAnthropicRequest_ThinkingOnlyStreamIsError(t *testing.T) {
 	if res.Err == nil {
 		t.Fatal("thinking-only stream should be an error")
 	}
-	if !strings.Contains(res.Err.Error(), "no output tokens received") {
-		t.Errorf("error = %q, want it to mention %q", res.Err.Error(), "no output tokens received")
+	if !strings.Contains(res.Err.Error(), "only reasoning tokens received") {
+		t.Errorf("error = %q, want it to mention %q", res.Err.Error(), "only reasoning tokens received")
 	}
 }
 

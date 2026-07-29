@@ -363,6 +363,7 @@ func doCompletionRequest(
 		outputBuf      strings.Builder
 		gotFirstToken  bool
 		gotContent     bool
+		gotReasoning   bool
 		skippedChunks  int
 	)
 
@@ -400,6 +401,9 @@ func doCompletionRequest(
 			if reasoning == "" {
 				reasoning = choice.Delta.Reasoning
 			}
+			if reasoning != "" {
+				gotReasoning = true
+			}
 			if content == "" && !(cfg.TTFTIncludesReasoning && reasoning != "") {
 				continue
 			}
@@ -422,7 +426,11 @@ func doCompletionRequest(
 	}
 
 	if !gotContent {
-		res.Err = fmt.Errorf("no output tokens received")
+		if gotReasoning {
+			res.Err = fmt.Errorf("only reasoning tokens received, no answer content (thinking exhausted max_tokens?)")
+		} else {
+			res.Err = fmt.Errorf("no output tokens received")
+		}
 		return res
 	}
 

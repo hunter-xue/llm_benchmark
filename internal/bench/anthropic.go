@@ -286,6 +286,7 @@ func doAnthropicRequest(
 		outputBuf      strings.Builder
 		gotFirstToken  bool
 		gotContent     bool
+		gotThinking    bool
 		skippedChunks  int
 		eventType      string
 	)
@@ -321,6 +322,9 @@ func doAnthropicRequest(
 		}
 		isText := chunk.Delta.Type == "text_delta" && chunk.Delta.Text != ""
 		isThinking := chunk.Delta.Type == "thinking_delta"
+		if isThinking {
+			gotThinking = true
+		}
 		if !isText && !(cfg.TTFTIncludesReasoning && isThinking) {
 			continue
 		}
@@ -342,7 +346,11 @@ func doAnthropicRequest(
 	}
 
 	if !gotContent {
-		res.Err = fmt.Errorf("no output tokens received")
+		if gotThinking {
+			res.Err = fmt.Errorf("only reasoning tokens received, no answer content (thinking exhausted max_tokens?)")
+		} else {
+			res.Err = fmt.Errorf("no output tokens received")
+		}
 		return res
 	}
 

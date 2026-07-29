@@ -58,7 +58,7 @@ func ClassifyError(err error) string {
 	switch {
 	case strings.Contains(msg, "timeout") || strings.Contains(msg, "deadline exceeded"):
 		return ErrorCategoryTimeout
-	case strings.Contains(msg, "no output tokens received"):
+	case strings.Contains(msg, "no output tokens received") || strings.Contains(msg, "no answer content"):
 		return ErrorCategoryEmptyOutput
 	case strings.Contains(msg, "failed to read stream"):
 		return ErrorCategoryStream
