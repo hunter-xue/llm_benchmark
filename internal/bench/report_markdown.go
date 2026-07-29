@@ -195,10 +195,7 @@ func mdRedactAPIKey(key string) string {
 	if key == "" {
 		return "(none)"
 	}
-	if len(key) <= 4 {
-		return "***"
-	}
-	return "***" + key[len(key)-4:]
+	return maskCredential(key)
 }
 
 func mdTable(sb *strings.Builder, col1, col2 string, rows [][]string) {
@@ -255,9 +252,109 @@ func mdSummarizeErrorCategories(categories map[string]int) string {
 	return strings.Join(parts, ", ")
 }
 
+// --- completion single results ---
+
+func mdWriteCompletionSingle(sb *strings.Builder, r *CompletionReport) {
+	if r == nil {
+		sb.WriteString("_No results available._\n")
+		return
+	}
+	mdTable(sb, "Metric", "Value", mdSummaryRows(r.TotalRequests, r.SuccessCount, r.ErrorCount, r.ErrorCategories))
+	if !r.Valid {
+		sb.WriteString("_All requests failed — no metrics available._\n")
+		mdWriteLogSection(sb, r)
+		return
+	}
+	mdTable(sb, "Metric", "Value", [][]string{
+		{"Wall Time", fmt.Sprintf("%.2f s", r.WallTime.Seconds())},
+		{"RPS", mdFmtF(r.RPS, 2)},
+		{"Input TPS", mdFmtF(r.InputTPS, 1)},
+		{"Output TPS", mdFmtF(r.OutputTPS, 1)},
+		{"Input TPM", mdFmtF(r.InputTPM, 0)},
+		{"Output TPM", mdFmtF(r.OutputTPM, 0)},
+		{"Avg Output Tokens", mdFmtF(r.AvgOutputTokens, 1)},
+	})
+	mdTable(sb, "Metric", "Value", mdAPIUsageRows(r))
+	mdTable(sb, "Metric", "Value", [][]string{
+		{"TTFT Avg", mdFmtMs(r.TTFTAvg)},
+		{"TTFT P50", mdFmtMs(r.TTFTp50)},
+		{"TTFT P90", mdFmtMs(r.TTFTp90)},
+		{"TTFT P99", mdFmtMs(r.TTFTp99)},
+	})
+	mdTable(sb, "Metric", "Value", [][]string{
+		{"TPOT Avg", mdFmtMsPerTok(r.TPOTAvg)},
+		{"TPOT P50", mdFmtMsPerTok(r.TPOTp50)},
+		{"TPOT P90", mdFmtMsPerTok(r.TPOTp90)},
+		{"TPOT P99", mdFmtMsPerTok(r.TPOTp99)},
+	})
+	e2e := [][]string{
+		{"E2E Avg", mdFmtMs(r.E2EAvg)},
+		{"E2E P50", mdFmtMs(r.E2Ep50)},
+		{"E2E P90", mdFmtMs(r.E2Ep90)},
+		{"E2E P99", mdFmtMs(r.E2Ep99)},
+	}
+	if r.SkippedChunks > 0 {
+		e2e = append(e2e, []string{"Skipped SSE Chunks", fmt.Sprintf("%d (warning)", r.SkippedChunks)})
+	}
+	mdTable(sb, "Metric", "Value", e2e)
+	if r.QueueTimeAvg > 0 || r.QueueTimeP50 > 0 || r.QueueTimeP90 > 0 || r.QueueTimeP99 > 0 {
+		mdTable(sb, "Metric", "Value", [][]string{
+			{"Queue Time Avg", mdFmtMs(r.QueueTimeAvg)},
+			{"Queue Time P50", mdFmtMs(r.QueueTimeP50)},
+			{"Queue Time P90", mdFmtMs(r.QueueTimeP90)},
+			{"Queue Time P99", mdFmtMs(r.QueueTimeP99)},
+		})
+	}
+	mdWriteLogSection(sb, r)
+}
+
+func mdAPIUsageRows(r *CompletionReport) [][]string {
+	rows := [][]string{
+		{"API Prompt Tokens", mdAPIUsageTokens(r, r.APIPromptTokens)},
+		{"API Completion Tokens", mdAPIUsageTokens(r, r.APICompletionTokens)},
+		{"API Total Tokens", mdAPIUsageTokens(r, r.APITotalTokens)},
+		{"API Usage Samples", mdAPIUsageSamples(r)},
+	}
+	if r.MissingAPIUsageCount > 0 {
+		rows = append(rows, []string{"Missing API Usage", fmt.Sprintf("%d", r.MissingAPIUsageCount)})
+	}
+	return rows
+}
+
+func mdAPIUsageTokens(r *CompletionReport, value int) string {
+	if r.APIUsageCount == 0 {
+		return "N/A"
+	}
+	return fmt.Sprintf("%d", value)
+}
+
+func mdAPIUsageSamples(r *CompletionReport) string {
+	if r.SuccessCount == 0 {
+		return "N/A"
+	}
+	if r.APIUsageCount == 0 {
+		return fmt.Sprintf("N/A / %d", r.SuccessCount)
+	}
+	return fmt.Sprintf("%d / %d", r.APIUsageCount, r.SuccessCount)
+}
+
+func mdWriteLogSection(sb *strings.Builder, r *CompletionReport) {
+	if r.LogRequestsFile == "" {
+		return
+	}
+	sb.WriteString("## Logs\n\n")
+	fmt.Fprintf(sb, "- Requests: `%s`\n", r.LogRequestsFile)
+	fmt.Fprintf(sb, "- Responses: `%s`\n", r.LogResponsesFile)
+	if r.LogDroppedCount > 0 {
+		fmt.Fprintf(sb, "- ⚠ %d log entries dropped (disk too slow)\n", r.LogDroppedCount)
+	}
+	if r.LogError != "" {
+		fmt.Fprintf(sb, "- ⚠ log write error: %s\n", r.LogError)
+	}
+}
+
 // Temporary stubs — implemented in later tasks.
 func mdWriteEmbeddingPK(sb *strings.Builder, providers []ProviderConfig, reports []*EmbeddingReport) {
 }
-func mdWriteCompletionSingle(sb *strings.Builder, r *CompletionReport) {}
 func mdWriteCompletionPK(sb *strings.Builder, providers []ProviderConfig, reports []*CompletionReport) {
 }
