@@ -78,6 +78,7 @@ func TestBuildFieldDefs_CompletionClosedLoop(t *testing.T) {
 		"API URL", "API Key", "Model", "Custom Params",
 		"Load Model", "Concurrency", "Total Requests", "Input Tokens",
 		"Max Output Tokens", "TTFT Includes Reasoning", "System Prompt",
+		"Request Logging",
 	})
 }
 
@@ -101,6 +102,7 @@ func TestBuildFieldDefs_CompletionOpenLoop(t *testing.T) {
 		"API URL", "API Key", "Model", "Custom Params",
 		"Load Model", "Max In-Flight", "Request Rate", "Total Requests", "Input Tokens",
 		"Max Output Tokens", "TTFT Includes Reasoning", "System Prompt",
+		"Request Logging",
 	})
 }
 
@@ -470,5 +472,91 @@ func TestToggleFocusedField_Dispatch(t *testing.T) {
 	}
 	if m.ttftReasoningOn {
 		t.Error("Load Model toggle should not affect ttftReasoningOn")
+	}
+}
+
+func TestBuildFieldDefs_RequestLoggingToggleVisibility(t *testing.T) {
+	completionSingle := buildFieldDefs(bench.ModeCompletion, "single", 0)
+	found := false
+	for _, d := range completionSingle {
+		if d.label == "Request Logging" {
+			found = true
+			if d.fieldType != "toggle" {
+				t.Error("Request Logging should have fieldType \"toggle\"")
+			}
+		}
+	}
+	if !found {
+		t.Error("completion single-provider should include Request Logging toggle")
+	}
+
+	completionPK := buildFieldDefs(bench.ModeCompletion, "pk", 0)
+	if containsLabel(fieldLabels(completionPK), "Request Logging") {
+		t.Error("PK mode should not include Request Logging toggle")
+	}
+
+	anthropic := buildFieldDefs(bench.ModeAnthropicMessages, "single", 0)
+	if containsLabel(fieldLabels(anthropic), "Request Logging") {
+		t.Error("anthropic mode should not include Request Logging toggle")
+	}
+
+	embedding := buildFieldDefs(bench.ModeEmbedding, "single", 0)
+	if containsLabel(fieldLabels(embedding), "Request Logging") {
+		t.Error("embedding mode should not include Request Logging toggle")
+	}
+}
+
+func TestValidate_RequestLogging(t *testing.T) {
+	m := newConfigModel(bench.ModeCompletion, "single")
+	if m.requestLoggingOn {
+		t.Error("expected requestLoggingOn default false")
+	}
+
+	setInputsByLabel(&m, map[string]string{
+		"API URL":        "https://api.openai.com/v1/chat/completions",
+		"Model":          "gpt-4o-mini",
+		"Concurrency":    "10",
+		"Total Requests": "10",
+		"Input Tokens":   "100",
+	})
+
+	_, cfg, err := m.validate()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.RequestLogging {
+		t.Error("expected cfg.RequestLogging=false by default")
+	}
+
+	m.requestLoggingOn = true
+	_, cfg, err = m.validate()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.RequestLogging {
+		t.Error("expected cfg.RequestLogging=true after toggle on")
+	}
+}
+
+func TestToggleFocusedField_RequestLoggingDispatch(t *testing.T) {
+	m := newConfigModel(bench.ModeCompletion, "single")
+	for i, fd := range m.fieldDefs {
+		if fd.label == "Request Logging" {
+			m.focusIndex = i
+			break
+		}
+	}
+	if m.fieldDefs[m.focusIndex].label != "Request Logging" {
+		t.Fatal("Request Logging field not found")
+	}
+	m.toggleFocusedField()
+	if !m.requestLoggingOn {
+		t.Error("expected requestLoggingOn=true after toggle")
+	}
+	if m.loadModelIndex != 0 {
+		t.Error("Request Logging toggle should not affect loadModelIndex")
+	}
+	if !m.ttftReasoningOn {
+		t.Error("Request Logging toggle should not affect ttftReasoningOn")
 	}
 }

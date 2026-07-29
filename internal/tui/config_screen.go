@@ -20,15 +20,16 @@ type fieldDef struct {
 }
 
 type configModel struct {
-	apiMode         string
-	testMode        string
-	inputs          []textinput.Model
-	fieldDefs       []fieldDef
-	focusIndex      int
-	err             string
-	width           int
-	loadModelIndex  int  // 0 = closed-loop, 1 = open-loop (completion only)
-	ttftReasoningOn bool // TTFT Includes Reasoning toggle (completion-like modes)
+	apiMode          string
+	testMode         string
+	inputs           []textinput.Model
+	fieldDefs        []fieldDef
+	focusIndex       int
+	err              string
+	width            int
+	loadModelIndex   int  // 0 = closed-loop, 1 = open-loop (completion only)
+	ttftReasoningOn  bool // TTFT Includes Reasoning toggle (completion-like modes)
+	requestLoggingOn bool // Request Logging toggle (completion single-provider only)
 }
 
 func newConfigModel(apiMode, testMode string) configModel {
@@ -102,6 +103,12 @@ func buildFieldDefs(apiMode, testMode string, loadModelIndex int) []fieldDef {
 	// TTFT reasoning toggle field (completion-like modes)
 	ttftReasoningField := fieldDef{
 		label:     "TTFT Includes Reasoning",
+		fieldType: "toggle",
+	}
+
+	// Request Logging toggle field (completion single-provider only)
+	requestLoggingField := fieldDef{
+		label:     "Request Logging",
 		fieldType: "toggle",
 	}
 
@@ -203,6 +210,9 @@ func buildFieldDefs(apiMode, testMode string, loadModelIndex int) []fieldDef {
 			fieldDef{label: "System Prompt", placeholder: "optional, leave blank to skip"},
 		)
 	}
+	if isCompletion {
+		defs = append(defs, requestLoggingField)
+	}
 	return defs
 }
 
@@ -237,6 +247,8 @@ func (m *configModel) toggleFocusedField() {
 		m.toggleLoadModel()
 	case "TTFT Includes Reasoning":
 		m.ttftReasoningOn = !m.ttftReasoningOn
+	case "Request Logging":
+		m.requestLoggingOn = !m.requestLoggingOn
 	default:
 		panic(fmt.Sprintf("no toggle handler for field %q", m.fieldDefs[m.focusIndex].label))
 	}
@@ -469,6 +481,9 @@ func (m configModel) validate() ([]bench.ProviderConfig, bench.BenchConfig, erro
 		cfg.SystemPrompt = vals[fieldIdx("System Prompt")]
 		cfg.TTFTIncludesReasoning = m.ttftReasoningOn
 	}
+	if isCompletion {
+		cfg.RequestLogging = m.requestLoggingOn
+	}
 	providers := []bench.ProviderConfig{
 		{Name: "Provider", URL: apiURL, APIKey: vals[keyIdx], Model: vals[modelIdx], CustomParams: vals[customIdx]},
 	}
@@ -555,6 +570,11 @@ func (m configModel) renderToggle(label string) string {
 			return "(●) yes  ( ) no"
 		}
 		return "( ) yes  (●) no"
+	case "Request Logging":
+		if m.requestLoggingOn {
+			return "( ) off  (●) on"
+		}
+		return "(●) off  ( ) on"
 	}
 	panic(fmt.Sprintf("no toggle renderer for field %q", label))
 }
