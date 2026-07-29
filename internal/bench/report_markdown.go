@@ -556,9 +556,90 @@ func mdPKTable(sb *strings.Builder, nameA, nameB string, rows []mdPKRow) {
 
 func mdPKFailureNotes(sb *strings.Builder, nameA string, aValid bool, nameB string, bValid bool) {
 	if !aValid {
-		fmt.Fprintf(sb, "_%s: all requests failed_\n", nameA)
+		fmt.Fprintf(sb, "_%s: all requests failed_\n", mdEscape(nameA))
 	}
 	if !bValid {
-		fmt.Fprintf(sb, "_%s: all requests failed_\n", nameB)
+		fmt.Fprintf(sb, "_%s: all requests failed_\n", mdEscape(nameB))
 	}
+}
+
+// MarkdownCacheHitReport renders a Prompt Cache Hit test report as markdown.
+func MarkdownCacheHitReport(provider ProviderConfig, cfg CacheHitConfig, userPrompt string, r *CacheHitReport, now time.Time) string {
+	var sb strings.Builder
+	sb.WriteString("# Prompt Cache Hit Report\n\n")
+	sb.WriteString("Generated: " + now.Format("2006-01-02 15:04:05") + "\n\n")
+
+	sb.WriteString("## Test Parameters\n\n")
+	interval := cfg.Interval
+	if interval <= 0 {
+		interval = 3 * time.Second // same default as RunCacheHitTest
+	}
+	params := [][]string{
+		{"Provider", provider.Name},
+		{"URL", provider.URL},
+		{"Model", provider.Model},
+		{"API Key", mdRedactAPIKey(provider.APIKey)},
+	}
+	if provider.CustomParams != "" {
+		params = append(params, []string{"Custom Params", provider.CustomParams})
+	}
+	params = append(params,
+		[]string{"Test Count", fmt.Sprintf("%d", cfg.TestCount)},
+		[]string{"Max Output Tokens", mdMaxOutputTokens(cfg.MaxOutputTokens)},
+		[]string{"Interval", interval.String()},
+	)
+	if cfg.SystemPrompt != "" {
+		params = append(params, []string{"System Prompt", cfg.SystemPrompt})
+	}
+	params = append(params, []string{"User Prompt", userPrompt})
+	mdTable(&sb, "Parameter", "Value", params)
+
+	sb.WriteString("## Results\n\n")
+	if r == nil {
+		sb.WriteString("_No results available._\n")
+		return sb.String()
+	}
+	summary := mdSummaryRows(r.TotalRequests, r.SuccessCount, r.ErrorCount, r.ErrorCategories)
+	summary = append(summary, []string{"Wall Time", fmt.Sprintf("%.2f s", r.WallTime.Seconds())})
+	mdTable(&sb, "Metric", "Value", summary)
+
+	if !r.Valid {
+		sb.WriteString("_All requests failed — no cache metrics available._\n\n")
+	} else {
+		metrics := [][]string{
+			{"Prompt Tokens", fmt.Sprintf("%d", r.TotalPromptTokens)},
+			{"Cached Tokens", fmt.Sprintf("%d", r.TotalCachedTokens)},
+			{"Overall Hit Rate", fmt.Sprintf("%.2f%%", r.CacheHitRate)},
+			{"Avg Request Hit Rate", fmt.Sprintf("%.2f%%", r.AvgRequestHitRate)},
+			{"Avg Latency", mdFmtMs(r.AvgLatencyMs)},
+		}
+		if r.MissingUsageCount > 0 {
+			metrics = append(metrics, []string{"Missing Usage", fmt.Sprintf("%d", r.MissingUsageCount)})
+		}
+		if r.MissingCachedCount > 0 {
+			metrics = append(metrics, []string{"Missing Cached Field", fmt.Sprintf("%d", r.MissingCachedCount)})
+		}
+		mdTable(&sb, "Metric", "Value", metrics)
+	}
+
+	sb.WriteString("## Per-Request Results\n\n")
+	sb.WriteString("| # | Latency | Prompt | Cached | Hit Rate |\n")
+	sb.WriteString("|---|---|---|---|---|\n")
+	for _, res := range r.Results {
+		if res.Err != nil {
+			fmt.Fprintf(&sb, "| %d | error: %s | | | |\n", res.Index, mdEscape(res.Err.Error()))
+			continue
+		}
+		cached := "N/A"
+		hitRate := "N/A"
+		if res.HasCachedTokens {
+			cached = fmt.Sprintf("%d", res.CachedTokens)
+			if res.PromptTokens > 0 {
+				hitRate = fmt.Sprintf("%.2f%%", float64(res.CachedTokens)/float64(res.PromptTokens)*100)
+			}
+		}
+		fmt.Fprintf(&sb, "| %d | %s | %d | %s | %s |\n",
+			res.Index, mdFmtMs(float64(res.Latency.Milliseconds())), res.PromptTokens, cached, hitRate)
+	}
+	return sb.String()
 }

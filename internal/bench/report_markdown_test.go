@@ -1,6 +1,7 @@
 package bench
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -64,7 +65,7 @@ func TestMarkdownBenchReport_EmbeddingSingleAllFailed(t *testing.T) {
 	report := &EmbeddingReport{
 		TotalRequests: 3, ErrorCount: 3,
 		ErrorCategories: map[string]int{"server_error": 3},
-		Valid: false,
+		Valid:           false,
 	}
 	md := MarkdownBenchReport(ModeEmbedding, "single", providers, cfg, []*EmbeddingReport{report}, nil, time.Now())
 	if !strings.Contains(md, "_All requests failed — no metrics available._") {
@@ -95,19 +96,19 @@ func TestMdEscape(t *testing.T) {
 
 func fullCompletionReportForMD() *CompletionReport {
 	return &CompletionReport{
-		TotalRequests: 100, SuccessCount: 100, ErrorCount: 2,
+		TotalRequests: 100, SuccessCount: 98, ErrorCount: 2,
 		ErrorCategories: map[string]int{"timeout": 1, "rate_limit": 1},
 		Valid:           true,
 		WallTime:        10 * time.Second,
 		RPS:             9.8, InputTPS: 4900, OutputTPS: 1234,
 		InputTPM: 294000, OutputTPM: 74040, AvgOutputTokens: 128.5,
 		APIPromptTokens: 49000, APICompletionTokens: 12583, APITotalTokens: 61583,
-		APIUsageCount: 98, MissingAPIUsageCount: 2,
+		APIUsageCount: 96, MissingAPIUsageCount: 2,
 		TTFTAvg: 100, TTFTp50: 90, TTFTp90: 150, TTFTp99: 200,
 		TPOTAvg: 10, TPOTp50: 9, TPOTp90: 15, TPOTp99: 20,
 		E2EAvg: 1300, E2Ep50: 1200, E2Ep90: 1800, E2Ep99: 2000,
-		SkippedChunks:    3,
-		QueueTimeAvg:     5, QueueTimeP50: 4, QueueTimeP90: 8, QueueTimeP99: 12,
+		SkippedChunks: 3,
+		QueueTimeAvg:  5, QueueTimeP50: 4, QueueTimeP90: 8, QueueTimeP99: 12,
 		LogRequestsFile:  "bench_requests_20260729-120000.jsonl",
 		LogResponsesFile: "bench_responses_20260729-120000.jsonl",
 		LogDroppedCount:  7,
@@ -137,7 +138,7 @@ func TestMarkdownBenchReport_CompletionSingle(t *testing.T) {
 		"| API Prompt Tokens | 49000 |",
 		"| API Completion Tokens | 12583 |",
 		"| API Total Tokens | 61583 |",
-		"| API Usage Samples | 98 / 100 |",
+		"| API Usage Samples | 96 / 98 |",
 		"| Missing API Usage | 2 |",
 		"| TTFT Avg | 100.00 ms |",
 		"| TTFT P99 | 200.00 ms |",
@@ -257,8 +258,8 @@ func TestMarkdownBenchReport_CompletionPK(t *testing.T) {
 		"| Success / Total | 20 / 20 | 18 / 20 |",
 		"| API Prompt Tokens | 2000 | 1800 |",
 		"| API Usage Samples | 20 / 20 | 18 / 18 |",
-		"| RPS | **9.80** | 8.10 |",        // higher wins → Alpha bold
-		"| Output TPS | 300.0 | **320.0** |", // Beta bold
+		"| RPS | **9.80** | 8.10 |",                // higher wins → Alpha bold
+		"| Output TPS | 300.0 | **320.0** |",       // Beta bold
 		"| TTFT Avg | **100.00 ms** | 120.00 ms |", // lower wins → Alpha bold
 		"| TPOT Avg | 10.00 ms/tok | **9.00 ms/tok** |",
 		"| E2E P99 | **2000.00 ms** | 2100.00 ms |",
@@ -317,5 +318,111 @@ func TestMarkdownBenchReport_PKInvalidProvider(t *testing.T) {
 	}
 	if !strings.Contains(md, "| API Prompt Tokens | N/A | N/A |") {
 		t.Error("API usage rows render N/A when no usage data")
+	}
+}
+
+func TestMarkdownBenchReport_PKTie(t *testing.T) {
+	providers := []ProviderConfig{{Name: "A", URL: "http://a", Model: "m"}, {Name: "B", URL: "http://b", Model: "m"}}
+	cfg := BenchConfig{Mode: ModeEmbedding, Concurrency: 1, TotalRequests: 1}
+	a := &EmbeddingReport{TotalRequests: 1, SuccessCount: 1, Valid: true, RPS: 5}
+	b := &EmbeddingReport{TotalRequests: 1, SuccessCount: 1, Valid: true, RPS: 5}
+	md := MarkdownBenchReport(ModeEmbedding, "pk", providers, cfg, []*EmbeddingReport{a, b}, nil, time.Now())
+	if strings.Contains(md, "**") {
+		t.Error("tie should not bold any cell")
+	}
+	if !strings.Contains(md, "| RPS | 5.00 | 5.00 |") {
+		t.Error("tie row should render both values plainly")
+	}
+}
+
+func TestMarkdownBenchReport_PKQueueTime(t *testing.T) {
+	providers := []ProviderConfig{{Name: "A", URL: "http://a", Model: "m"}, {Name: "B", URL: "http://b", Model: "m"}}
+	cfg := BenchConfig{Mode: ModeCompletion, Concurrency: 1, TotalRequests: 1, LoadModel: LoadModelOpenLoop, RequestRate: 10, MaxInFlight: 2}
+	a := &CompletionReport{TotalRequests: 1, SuccessCount: 1, Valid: true, QueueTimeAvg: 3, QueueTimeP99: 9}
+	b := &CompletionReport{TotalRequests: 1, SuccessCount: 1, Valid: true}
+	md := MarkdownBenchReport(ModeCompletion, "pk", providers, cfg, nil, []*CompletionReport{a, b}, time.Now())
+	if !strings.Contains(md, "| Queue Time Avg | 3.00 ms | **0.00 ms** |") {
+		t.Error("queue time rows should appear when either provider has data")
+	}
+	if !strings.Contains(md, "| Queue Time P99 | 9.00 ms | **0.00 ms** |") {
+		t.Error("queue time winner should be bolded (lower wins)")
+	}
+}
+
+func TestMarkdownBenchReport_PKBothInvalid(t *testing.T) {
+	providers := []ProviderConfig{{Name: "A", URL: "http://a", Model: "m"}, {Name: "B", URL: "http://b", Model: "m"}}
+	cfg := BenchConfig{Mode: ModeCompletion, Concurrency: 1, TotalRequests: 1}
+	a := &CompletionReport{TotalRequests: 1, ErrorCount: 1, Valid: false}
+	b := &CompletionReport{TotalRequests: 1, ErrorCount: 1, Valid: false}
+	md := MarkdownBenchReport(ModeCompletion, "pk", providers, cfg, nil, []*CompletionReport{a, b}, time.Now())
+	if !strings.Contains(md, "_A: all requests failed_") || !strings.Contains(md, "_B: all requests failed_") {
+		t.Error("both failure notes should appear")
+	}
+}
+
+func TestMarkdownCacheHitReport(t *testing.T) {
+	provider := ProviderConfig{Name: "Provider", URL: "http://x/v1/chat/completions", APIKey: "sk-abcdefgh", Model: "qwen3", CustomParams: `{"prompt_cache_key":"benchmark"}`}
+	cfg := CacheHitConfig{TestCount: 3, MaxOutputTokens: 1, SystemPrompt: "sys"}
+	r := &CacheHitReport{
+		TotalRequests: 3, SuccessCount: 2, ErrorCount: 1,
+		WallTime: 8 * time.Second, Valid: true,
+		TotalPromptTokens: 12000, TotalCachedTokens: 8000,
+		CacheHitRate: 66.67, AvgRequestHitRate: 66.67, AvgLatencyMs: 250,
+		ErrorCategories: map[string]int{"timeout": 1},
+		Results: []CacheHitResult{
+			{Index: 1, Latency: 200 * time.Millisecond, PromptTokens: 4000, CachedTokens: 4000, HasCachedTokens: true},
+			{Index: 2, Latency: 300 * time.Millisecond, PromptTokens: 4000, HasCachedTokens: false},
+			{Index: 3, Err: fmt.Errorf("connection refused")},
+		},
+	}
+	now := time.Date(2026, 7, 29, 15, 30, 45, 0, time.Local)
+	md := MarkdownCacheHitReport(provider, cfg, "repeat this prompt", r, now)
+
+	for _, want := range []string{
+		"# Prompt Cache Hit Report",
+		"## Test Parameters",
+		"| API Key | ***efgh |",
+		"| Custom Params | {\"prompt_cache_key\":\"benchmark\"} |",
+		"| Test Count | 3 |",
+		"| Max Output Tokens | 1 |",
+		"| Interval | 3s |",
+		"| System Prompt | sys |",
+		"| User Prompt | repeat this prompt |",
+		"## Results",
+		"| Successful | 2 (66.7%) |",
+		"| Wall Time | 8.00 s |",
+		"| Error Categories | timeout: 1 |",
+		"| Prompt Tokens | 12000 |",
+		"| Cached Tokens | 8000 |",
+		"| Overall Hit Rate | 66.67% |",
+		"| Avg Latency | 250.00 ms |",
+		"## Per-Request Results",
+		"| # | Latency | Prompt | Cached | Hit Rate |",
+		"| 1 | 200.00 ms | 4000 | 4000 | 100.00% |",
+		"| 2 | 300.00 ms | 4000 | N/A | N/A |",
+		"| 3 | error: connection refused | | | |",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("cache hit report missing %q\n--- report ---\n%s", want, md)
+		}
+	}
+}
+
+func TestMarkdownCacheHitReportAllFailed(t *testing.T) {
+	provider := ProviderConfig{Name: "Provider", URL: "http://x", Model: "m"}
+	cfg := CacheHitConfig{TestCount: 2}
+	r := &CacheHitReport{
+		TotalRequests: 2, ErrorCount: 2, Valid: false,
+		Results: []CacheHitResult{{Index: 1, Err: fmt.Errorf("boom")}},
+	}
+	md := MarkdownCacheHitReport(provider, cfg, "p", r, time.Now())
+	if !strings.Contains(md, "_All requests failed — no cache metrics available._") {
+		t.Error("expected all-failed note")
+	}
+	if strings.Contains(md, "| Overall Hit Rate |") {
+		t.Error("metrics table must be omitted when all requests failed")
+	}
+	if !strings.Contains(md, "| 1 | error: boom | | | |") {
+		t.Error("per-request table must still be present")
 	}
 }
