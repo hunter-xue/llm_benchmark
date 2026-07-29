@@ -433,7 +433,7 @@ func TestMarkdownCacheHitReportMissingAndZeroPrompt(t *testing.T) {
 	provider := ProviderConfig{Name: "Provider", URL: "http://x", Model: "m"}
 	cfg := CacheHitConfig{TestCount: 2, Interval: 5 * time.Second}
 	r := &CacheHitReport{
-		TotalRequests: 2, SuccessCount: 2, Valid: true,
+		TotalRequests: 1, SuccessCount: 1, Valid: true,
 		MissingUsageCount: 1, MissingCachedCount: 1,
 		Results: []CacheHitResult{
 			{Index: 1, Latency: 100 * time.Millisecond, PromptTokens: 0, CachedTokens: 0, HasCachedTokens: true},
@@ -486,8 +486,11 @@ func TestWriteMarkdownReport(t *testing.T) {
 }
 
 func TestWriteMarkdownReportBadDir(t *testing.T) {
-	_, err := WriteMarkdownReport(filepath.Join(t.TempDir(), "nonexistent", "sub"), "bench_report", "x", time.Now())
+	name, err := WriteMarkdownReport(filepath.Join(t.TempDir(), "nonexistent", "sub"), "bench_report", "x", time.Now())
 	if err == nil {
 		t.Error("expected error for nonexistent directory")
+	}
+	if name != "" {
+		t.Errorf("expected empty name on error, got %q", name)
 	}
 }

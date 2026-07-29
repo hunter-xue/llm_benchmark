@@ -19,6 +19,8 @@ type resultsModel struct {
 	completionReports []*bench.CompletionReport // len 1 for single, 2 for PK
 	providerNames     []string
 	hasErrors         bool
+	reportFile        string // auto-written markdown report file name ("" = not written)
+	reportErr         string // markdown report write error, if any
 	width             int
 	height            int
 	vp                viewport.Model
@@ -115,8 +117,9 @@ func (m *resultsModel) setSize(w, h int) {
 	m.width = w
 	m.height = h
 	vpW := w - 4
-	// Reserve lines for: title + margin (2) + scroll indicator (1) + hints + margin (2).
-	vpH := h - 5
+	// Reserve lines for: title + margin (2) + scroll indicator (1)
+	// + report status (1) + hints + margin (2).
+	vpH := h - 6
 	if vpW < 10 {
 		vpW = 10
 	}
@@ -191,6 +194,7 @@ func (m resultsModel) view(width, height int) string {
 	sb.WriteString("\n")
 	sb.WriteString(m.vp.View())
 	sb.WriteString("\n")
+	renderReportStatus(&sb, m.reportFile, m.reportErr)
 	sb.WriteString(helpStyle.Render(m.hints()))
 	return sb.String()
 }
@@ -691,4 +695,16 @@ func reportCompletionCategories(r *bench.CompletionReport) map[string]int {
 		return nil
 	}
 	return r.ErrorCategories
+}
+
+// renderReportStatus renders the auto markdown report status line shown above
+// the hints on result screens.
+func renderReportStatus(sb *strings.Builder, reportFile, reportErr string) {
+	if reportFile != "" {
+		sb.WriteString(dimStyle.Render("  Report saved: " + reportFile))
+		sb.WriteString("\n")
+	} else if reportErr != "" {
+		sb.WriteString(errorStyle.Render("  ⚠ failed to write report: " + reportErr))
+		sb.WriteString("\n")
+	}
 }

@@ -26,8 +26,8 @@ func fullCompletionReport() *bench.CompletionReport {
 		TTFTAvg: 100, TTFTp50: 90, TTFTp90: 150, TTFTp99: 200,
 		TPOTAvg: 10, TPOTp50: 9, TPOTp90: 15, TPOTp99: 20,
 		E2EAvg: 1300, E2Ep50: 1200, E2Ep90: 1800, E2Ep99: 2000,
-		SkippedChunks:    3,
-		QueueTimeAvg:     5, QueueTimeP50: 4, QueueTimeP90: 8, QueueTimeP99: 12,
+		SkippedChunks: 3,
+		QueueTimeAvg:  5, QueueTimeP50: 4, QueueTimeP90: 8, QueueTimeP99: 12,
 		LogRequestsFile:  "bench_requests_20260729-120000.jsonl",
 		LogResponsesFile: "bench_responses_20260729-120000.jsonl",
 	}
@@ -143,5 +143,32 @@ func TestRenderCompletionSingle_NoLogInfoWhenDisabled(t *testing.T) {
 	out := sb.String()
 	if strings.Contains(out, "Logs:") {
 		t.Error("results should not show log paths when logging disabled")
+	}
+}
+
+func TestResultsViewShowsReportStatus(t *testing.T) {
+	m := newResultsModel(bench.ModeCompletion, "single", []string{"p"})
+	m.addCompletionResult(0, fullCompletionReport())
+	m.setSize(100, 24)
+	m.reportFile = "bench_report_20260729_153045.md"
+
+	out := m.view(100, 24)
+	if !strings.Contains(out, "Report saved: bench_report_20260729_153045.md") {
+		t.Error("results view should show the saved report file name")
+	}
+	if n := strings.Count(out, "\n") + 1; n > 24 {
+		t.Errorf("results view with status line rendered %d lines, exceeds terminal height 24", n)
+	}
+}
+
+func TestResultsViewShowsReportError(t *testing.T) {
+	m := newResultsModel(bench.ModeCompletion, "single", []string{"p"})
+	m.addCompletionResult(0, fullCompletionReport())
+	m.setSize(100, 24)
+	m.reportErr = "permission denied"
+
+	out := m.view(100, 24)
+	if !strings.Contains(out, "failed to write report: permission denied") {
+		t.Error("results view should show the report write error")
 	}
 }

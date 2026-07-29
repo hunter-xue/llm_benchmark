@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -32,6 +33,10 @@ const (
 // prog holds the global program reference so goroutines can call p.Send().
 // Safe for single-program use.
 var prog *tea.Program
+
+// markdownReportDir is where auto markdown reports are written.
+// "." in production; tests override it.
+var markdownReportDir = "."
 
 // SetProgram stores the program reference before p.Run() is called.
 func SetProgram(p *tea.Program) { prog = p }
@@ -170,7 +175,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.errorViewport.setContent(m.results.mergedErrorCategories(), m.results.mergedErrorDetails())
 
 		if m.doneProviders >= len(m.providers) {
-			// All done — go to results
+			// All done — write the auto markdown report, then go to results
+			now := time.Now()
+			content := bench.MarkdownBenchReport(m.apiMode, m.testMode, m.providers, m.cfg, m.results.embeddingReports, m.results.completionReports, now)
+			name, err := bench.WriteMarkdownReport(markdownReportDir, "bench_report", content, now)
+			if err != nil {
+				m.results.reportErr = err.Error()
+			} else {
+				m.results.reportFile = name
+			}
 			m.screen = ScreenResults
 		}
 		return m, nil
