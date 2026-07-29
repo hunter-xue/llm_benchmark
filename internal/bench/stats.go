@@ -40,6 +40,10 @@ type CompletionReport struct {
 	APITotalTokens       int
 	APIUsageCount        int
 	MissingAPIUsageCount int
+	LogRequestsFile      string // request logging: path of the requests JSONL file ("" = disabled)
+	LogResponsesFile     string // request logging: path of the responses JSONL file
+	LogDroppedCount      int    // request logging: entries dropped because the disk could not keep up
+	LogError             string // request logging: first write error, if any
 	TTFTAvg              float64
 	TTFTp50              float64
 	TTFTp90              float64
