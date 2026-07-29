@@ -54,6 +54,9 @@ type logEntry struct {
 // RequestLogger asynchronously writes request/response JSONL files.
 // Safe for concurrent use. Enqueue never blocks: entries are dropped
 // (and counted) when the writer falls behind.
+//
+// Lifecycle: producers must stop calling LogRequest/LogResponse before
+// Close is called. Close is not idempotent.
 type RequestLogger struct {
 	requestsFile  string
 	responsesFile string
@@ -153,8 +156,12 @@ func (l *RequestLogger) enqueue(e logEntry) {
 func (l *RequestLogger) Close() {
 	close(l.ch)
 	l.wg.Wait()
-	l.reqFile.Close()
-	l.respFile.Close()
+	if err := l.reqFile.Close(); err != nil {
+		l.setErr(err)
+	}
+	if err := l.respFile.Close(); err != nil {
+		l.setErr(err)
+	}
 }
 
 func (l *RequestLogger) writeLoop() {
