@@ -118,7 +118,7 @@ func RunCompletionBench(
 				default:
 				}
 
-				res := doCompletionRequest(ctx, client, provider, cfg, testText, actualInputTokens, tkm)
+				res := doCompletionRequest(ctx, client, provider, cfg, testText, actualInputTokens, tkm, "", nil)
 				results <- res
 				mu.Lock()
 				if res.Err != nil {
@@ -243,6 +243,8 @@ func doCompletionRequest(
 	testText string,
 	actualInputTokens int,
 	tkm *tiktoken.Tiktoken,
+	reqID string,
+	logger *RequestLogger,
 ) completionResult {
 	res := completionResult{InputTokens: actualInputTokens}
 
@@ -280,7 +282,27 @@ func doCompletionRequest(
 		req.Header.Set("Authorization", "Bearer "+provider.APIKey)
 	}
 
+	// LogRequest runs before sendTime so logging can never inflate TTFT/E2E.
+	if logger != nil {
+		logger.LogRequest(reqID, req.Method, provider.URL, req.Header, body)
+	}
+
 	sendTime := time.Now()
+
+	// Response logging state, captured for the deferred LogResponse call which
+	// runs after all timing points (TTFT/E2E) have been recorded.
+	var (
+		respStatus  string
+		respHeaders http.Header
+		respChunks  []string
+		errBodyText string
+	)
+	if logger != nil {
+		defer func() {
+			logger.LogResponse(reqID, respStatus, respHeaders, respChunks, errBodyText, res.Err, time.Since(sendTime))
+		}()
+	}
+
 	resp, err := client.Do(req)
 	if err != nil {
 		res.Err = err
@@ -288,10 +310,14 @@ func doCompletionRequest(
 	}
 	defer resp.Body.Close()
 
+	respStatus = resp.Status
+	respHeaders = resp.Header
+
 	if resp.StatusCode != http.StatusOK {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		if len(errBody) > 0 {
-			res.Err = fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(errBody)))
+		errBodyText = strings.TrimSpace(string(errBody))
+		if len(errBodyText) > 0 {
+			res.Err = fmt.Errorf("HTTP %d: %s", resp.StatusCode, errBodyText)
 		} else {
 			res.Err = fmt.Errorf("HTTP %d", resp.StatusCode)
 		}
@@ -312,6 +338,9 @@ func doCompletionRequest(
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		if logger != nil && line != "" {
+			respChunks = append(respChunks, line)
+		}
 		if !strings.HasPrefix(line, "data:") {
 			continue
 		}

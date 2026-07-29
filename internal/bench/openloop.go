@@ -105,7 +105,7 @@ func RunOpenLoopCompletionBench(
 			defer wg.Done()
 			defer func() { <-semaphore }() // release slot
 
-			res := doCompletionRequest(ctx, client, provider, cfg, testText, actualInputTokens, tkm)
+			res := doCompletionRequest(ctx, client, provider, cfg, testText, actualInputTokens, tkm, "", nil)
 			res.QueueTime = qt
 			results <- res
 

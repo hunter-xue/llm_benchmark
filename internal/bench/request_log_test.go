@@ -1,9 +1,12 @@
 package bench
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -171,5 +174,170 @@ func TestRequestLogger_ResponseEntryWithError(t *testing.T) {
 	}
 	if e.Chunks != nil {
 		t.Errorf("chunks = %v, want nil", e.Chunks)
+	}
+}
+
+// loggedRequestServer streams two content chunks and [DONE].
+func loggedRequestServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher := w.(http.Flusher)
+		fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\n")
+		flusher.Flush()
+		fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":\" world\"}}]}\n\n")
+		flusher.Flush()
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	}))
+}
+
+func readJSONLLines(t *testing.T, path string) []string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	trimmed := strings.TrimSpace(string(b))
+	if trimmed == "" {
+		return nil
+	}
+	return strings.Split(trimmed, "\n")
+}
+
+func TestDoCompletionRequest_LogsRequestAndResponse(t *testing.T) {
+	server := loggedRequestServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	logger, err := NewRequestLogger(dir, "run1")
+	if err != nil {
+		t.Fatalf("NewRequestLogger: %v", err)
+	}
+
+	tkm := testTokenizer(t)
+	provider := ProviderConfig{URL: server.URL, Model: "test-model", APIKey: "sk-abcdefgh"}
+	cfg := BenchConfig{Mode: ModeCompletion, TTFTIncludesReasoning: true, RequestLogging: true}
+	client := &http.Client{Timeout: 10 * time.Second}
+	res := doCompletionRequest(context.Background(), client, provider, cfg, "test prompt", 2, tkm, "run1-000001", logger)
+	if res.Err != nil {
+		t.Fatalf("unexpected error: %v", res.Err)
+	}
+	logger.Close()
+
+	reqLines := readJSONLLines(t, filepath.Join(dir, "bench_requests_run1.jsonl"))
+	if len(reqLines) != 1 {
+		t.Fatalf("requests lines = %d, want 1", len(reqLines))
+	}
+	var reqEntry requestLogEntry
+	if err := json.Unmarshal([]byte(reqLines[0]), &reqEntry); err != nil {
+		t.Fatalf("invalid request JSON: %v", err)
+	}
+	if reqEntry.RequestID != "run1-000001" {
+		t.Errorf("request_id = %q", reqEntry.RequestID)
+	}
+	if reqEntry.URL != server.URL {
+		t.Errorf("url = %q, want %q", reqEntry.URL, server.URL)
+	}
+	if reqEntry.Headers["Authorization"] != "Bearer ***efgh" {
+		t.Errorf("Authorization = %q, want redacted", reqEntry.Headers["Authorization"])
+	}
+	if !strings.Contains(string(reqEntry.Body), `"model":"test-model"`) {
+		t.Errorf("body missing model: %s", reqEntry.Body)
+	}
+
+	respLines := readJSONLLines(t, filepath.Join(dir, "bench_responses_run1.jsonl"))
+	if len(respLines) != 1 {
+		t.Fatalf("responses lines = %d, want 1", len(respLines))
+	}
+	var respEntry responseLogEntry
+	if err := json.Unmarshal([]byte(respLines[0]), &respEntry); err != nil {
+		t.Fatalf("invalid response JSON: %v", err)
+	}
+	if respEntry.RequestID != "run1-000001" {
+		t.Errorf("request_id = %q", respEntry.RequestID)
+	}
+	if respEntry.Status != "200 OK" {
+		t.Errorf("status = %q", respEntry.Status)
+	}
+	// Every raw SSE line (incl. data: prefix and [DONE]) must be logged.
+	wantChunks := []string{
+		`data: {"choices":[{"delta":{"content":"Hello"}}]}`,
+		`data: {"choices":[{"delta":{"content":" world"}}]}`,
+		`data: [DONE]`,
+	}
+	if len(respEntry.Chunks) != len(wantChunks) {
+		t.Fatalf("chunks = %v, want %v", respEntry.Chunks, wantChunks)
+	}
+	for i, want := range wantChunks {
+		if respEntry.Chunks[i] != want {
+			t.Errorf("chunks[%d] = %q, want %q", i, respEntry.Chunks[i], want)
+		}
+	}
+	if respEntry.Error != "" {
+		t.Errorf("error = %q, want empty", respEntry.Error)
+	}
+}
+
+func TestDoCompletionRequest_LogsHTTPError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(w, `{"error":"upstream down"}`)
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	logger, err := NewRequestLogger(dir, "run1")
+	if err != nil {
+		t.Fatalf("NewRequestLogger: %v", err)
+	}
+
+	tkm := testTokenizer(t)
+	provider := ProviderConfig{URL: server.URL, Model: "test-model"}
+	cfg := BenchConfig{Mode: ModeCompletion, RequestLogging: true}
+	client := &http.Client{Timeout: 10 * time.Second}
+	res := doCompletionRequest(context.Background(), client, provider, cfg, "test prompt", 2, tkm, "run1-000007", logger)
+	if res.Err == nil {
+		t.Fatal("expected error for HTTP 500")
+	}
+	logger.Close()
+
+	respLines := readJSONLLines(t, filepath.Join(dir, "bench_responses_run1.jsonl"))
+	if len(respLines) != 1 {
+		t.Fatalf("responses lines = %d, want 1", len(respLines))
+	}
+	var e responseLogEntry
+	if err := json.Unmarshal([]byte(respLines[0]), &e); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if e.RequestID != "run1-000007" {
+		t.Errorf("request_id = %q", e.RequestID)
+	}
+	if !strings.HasPrefix(e.Status, "500") {
+		t.Errorf("status = %q, want 500 ...", e.Status)
+	}
+	if !strings.Contains(e.Body, "upstream down") {
+		t.Errorf("body = %q, want error snippet", e.Body)
+	}
+	if !strings.Contains(e.Error, "HTTP 500") {
+		t.Errorf("error = %q, want HTTP 500 ...", e.Error)
+	}
+	if len(e.Chunks) != 0 {
+		t.Errorf("chunks = %v, want empty", e.Chunks)
+	}
+}
+
+func TestDoCompletionRequest_NilLoggerWritesNothing(t *testing.T) {
+	server := loggedRequestServer(t)
+	defer server.Close()
+
+	tkm := testTokenizer(t)
+	provider := ProviderConfig{URL: server.URL, Model: "test-model"}
+	cfg := BenchConfig{Mode: ModeCompletion, TTFTIncludesReasoning: true}
+	client := &http.Client{Timeout: 10 * time.Second}
+	res := doCompletionRequest(context.Background(), client, provider, cfg, "test prompt", 2, tkm, "", nil)
+	if res.Err != nil {
+		t.Fatalf("unexpected error: %v", res.Err)
 	}
 }

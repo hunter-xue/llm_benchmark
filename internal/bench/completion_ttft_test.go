@@ -71,7 +71,7 @@ func doSingleCompletion(t *testing.T, server *httptest.Server, ttftReasoning boo
 		TTFTIncludesReasoning: ttftReasoning,
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
-	return doCompletionRequest(context.Background(), client, provider, cfg, "test prompt", 2, tkm)
+	return doCompletionRequest(context.Background(), client, provider, cfg, "test prompt", 2, tkm, "", nil)
 }
 
 func TestDoCompletionRequest_TTFTIncludesReasoning(t *testing.T) {
@@ -291,7 +291,7 @@ func TestDoCompletionRequest_WirePayload(t *testing.T) {
 	provider := ProviderConfig{URL: server.URL, Model: "kimi-k2.6"}
 	cfg := BenchConfig{Mode: ModeCompletion, MaxOutputTokens: 1024, TTFTIncludesReasoning: true}
 	client := &http.Client{Timeout: 10 * time.Second}
-	res := doCompletionRequest(context.Background(), client, provider, cfg, "test prompt", 2, tkm)
+	res := doCompletionRequest(context.Background(), client, provider, cfg, "test prompt", 2, tkm, "", nil)
 	if res.Err != nil {
 		t.Fatalf("unexpected error: %v", res.Err)
 	}
