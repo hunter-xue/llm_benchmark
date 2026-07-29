@@ -36,6 +36,28 @@ func TestRenderCompletionSingle_ShowsLogInfo(t *testing.T) {
 	}
 }
 
+func TestRenderCompletionSingle_ShowsLogInfoWhenAllRequestsFailed(t *testing.T) {
+	m := newResultsModel(bench.ModeCompletion, "single", []string{"Provider"})
+	m.addCompletionResult(0, &bench.CompletionReport{
+		TotalRequests:    3,
+		SuccessCount:     0,
+		ErrorCount:       3,
+		LogRequestsFile:  "bench_requests_20260729-153045.jsonl",
+		LogResponsesFile: "bench_responses_20260729-153045.jsonl",
+		ErrorDetails:     map[string]int{"HTTP 500": 3},
+		Valid:            false,
+	})
+	var sb strings.Builder
+	m.renderCompletionSingle(&sb)
+	out := sb.String()
+	if !strings.Contains(out, "bench_requests_20260729-153045.jsonl") {
+		t.Error("results should show the requests log file path even when all requests failed")
+	}
+	if !strings.Contains(out, "bench_responses_20260729-153045.jsonl") {
+		t.Error("results should show the responses log file path even when all requests failed")
+	}
+}
+
 func TestRenderCompletionSingle_NoLogInfoWhenDisabled(t *testing.T) {
 	m := newResultsModel(bench.ModeCompletion, "single", []string{"Provider"})
 	m.addCompletionResult(0, &bench.CompletionReport{

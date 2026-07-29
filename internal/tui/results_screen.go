@@ -310,6 +310,20 @@ func (m resultsModel) renderCompletionSingle(sb *strings.Builder) {
 	renderTwoColTable(sb, summaryRows)
 	renderErrorCategorySummary(sb, r.ErrorCategories)
 
+	if r.LogRequestsFile != "" {
+		sb.WriteString("\n")
+		sb.WriteString(dimStyle.Render(fmt.Sprintf("  Logs: %s / %s", r.LogRequestsFile, r.LogResponsesFile)))
+		sb.WriteString("\n")
+		if r.LogDroppedCount > 0 {
+			sb.WriteString(errorStyle.Render(fmt.Sprintf("  ⚠ %d log entries dropped (disk too slow)", r.LogDroppedCount)))
+			sb.WriteString("\n")
+		}
+		if r.LogError != "" {
+			sb.WriteString(errorStyle.Render(fmt.Sprintf("  ⚠ log write error: %s", r.LogError)))
+			sb.WriteString("\n")
+		}
+	}
+
 	if !r.Valid {
 		sb.WriteString("\n")
 		sb.WriteString(errorStyle.Render("  All requests failed — no metrics available."))
@@ -370,20 +384,6 @@ func (m resultsModel) renderCompletionSingle(sb *strings.Builder) {
 			{"Queue Time P90", fmtMs(r.QueueTimeP90)},
 			{"Queue Time P99", fmtMs(r.QueueTimeP99)},
 		})
-	}
-
-	if r.LogRequestsFile != "" {
-		sb.WriteString("\n")
-		sb.WriteString(dimStyle.Render(fmt.Sprintf("  Logs: %s / %s", r.LogRequestsFile, r.LogResponsesFile)))
-		sb.WriteString("\n")
-		if r.LogDroppedCount > 0 {
-			sb.WriteString(errorStyle.Render(fmt.Sprintf("  ⚠ %d log entries dropped (disk too slow)", r.LogDroppedCount)))
-			sb.WriteString("\n")
-		}
-		if r.LogError != "" {
-			sb.WriteString(errorStyle.Render(fmt.Sprintf("  ⚠ log write error: %s", r.LogError)))
-			sb.WriteString("\n")
-		}
 	}
 
 	if r.ErrorCount > 0 {
