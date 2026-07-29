@@ -12,3 +12,7 @@ vendor/
 
 # Git worktrees
 .worktrees/
+
+# 压测请求日志
+bench_requests_*.jsonl
+bench_responses_*.jsonl
