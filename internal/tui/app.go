@@ -504,7 +504,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "ctrl+e":
-			plain := stripANSI(m.cacheHitResults.view(m.width, m.height))
+			plain := stripANSI(m.cacheHitResults.plainText())
 			return m, m.export.activate(plain)
 		}
 	}

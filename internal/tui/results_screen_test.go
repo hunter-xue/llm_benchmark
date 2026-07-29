@@ -192,3 +192,15 @@ func TestCacheHitResultsViewShowsReportStatusWhenAllFailed(t *testing.T) {
 		t.Error("status line must also appear on the all-failed view path")
 	}
 }
+
+func TestCacheHitResultsPlainTextExcludesReportStatus(t *testing.T) {
+	m := newCacheHitResultsModel()
+	m.setReport(&bench.CacheHitReport{TotalRequests: 1, SuccessCount: 1, Valid: true})
+	m.reportFile = "cache_hit_report_20260729_153045.md"
+	if !strings.Contains(m.view(100, 24), "Report saved:") {
+		t.Fatal("view should show the status line")
+	}
+	if strings.Contains(m.plainText(), "Report saved:") {
+		t.Error("plainText (ctrl+e export) must not contain the status line")
+	}
+}

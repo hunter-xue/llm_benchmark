@@ -149,3 +149,29 @@ func TestCacheHitDoneMsgWritesMarkdownReport(t *testing.T) {
 		t.Error("should still transition to cache hit results screen")
 	}
 }
+
+func TestCacheHitDoneMsgReportWriteFailure(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "nonexistent", "sub")
+	old := markdownReportDir
+	markdownReportDir = dir
+	defer func() { markdownReportDir = old }()
+
+	m := NewModel(nil)
+	m.providers = []bench.ProviderConfig{{Name: "Provider", URL: "http://x", Model: "m"}}
+	m.cacheHitCfg = bench.CacheHitConfig{TestCount: 1}
+	m.cacheHitPrompt = "repeat me"
+
+	updated, _ := m.Update(CacheHitDoneMsg{
+		Report: &bench.CacheHitReport{TotalRequests: 1, SuccessCount: 1, Valid: true},
+	})
+	um := updated.(Model)
+	if um.cacheHitResults.reportErr == "" {
+		t.Error("expected reportErr to be set when the write fails")
+	}
+	if um.cacheHitResults.reportFile != "" {
+		t.Error("reportFile must stay empty on write failure")
+	}
+	if um.screen != ScreenCacheHitResults {
+		t.Error("should still transition to cache hit results screen on write failure")
+	}
+}
