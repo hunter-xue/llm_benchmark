@@ -603,6 +603,52 @@ func TestRunCompletionBench_LoggingDisabledByDefault(t *testing.T) {
 	}
 }
 
+func TestRunOpenLoopCompletionBench_LogsEndToEnd(t *testing.T) {
+	server := loggedRequestServer(t)
+	defer server.Close()
+
+	old := requestLogDir
+	requestLogDir = t.TempDir()
+	defer func() { requestLogDir = old }()
+
+	tkm := testTokenizer(t)
+	provider := ProviderConfig{URL: server.URL, Model: "test-model"}
+	cfg := BenchConfig{
+		Mode:                  ModeCompletion,
+		LoadModel:             LoadModelOpenLoop,
+		RequestRate:           100,
+		MaxInFlight:           2,
+		Concurrency:           2,
+		TotalRequests:         3,
+		TTFTIncludesReasoning: true,
+		RequestLogging:        true,
+	}
+	report := RunOpenLoopCompletionBench(context.Background(), provider, cfg, "test prompt", 2, tkm, nil)
+	if !report.Valid {
+		t.Fatalf("report invalid; errors: %v", report.ErrorDetails)
+	}
+	if report.SuccessCount != 3 {
+		t.Errorf("SuccessCount = %d, want 3", report.SuccessCount)
+	}
+
+	reqLines := readJSONLLines(t, report.LogRequestsFile)
+	respLines := readJSONLLines(t, report.LogResponsesFile)
+	if len(reqLines) != 3 || len(respLines) != 3 {
+		t.Fatalf("lines = %d requests / %d responses, want 3/3", len(reqLines), len(respLines))
+	}
+	ids := make(map[string]int)
+	for _, line := range respLines {
+		var e responseLogEntry
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			t.Fatalf("invalid JSON: %v", err)
+		}
+		ids[e.RequestID]++
+	}
+	if len(ids) != 3 {
+		t.Errorf("distinct response request IDs = %d, want 3", len(ids))
+	}
+}
+
 func TestRunCompletionBench_LoggingWithCancellation(t *testing.T) {
 	// Server that streams one chunk then hangs, so cancellation hits mid-run.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

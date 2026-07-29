@@ -2,11 +2,13 @@ package bench
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"math/rand"
 	"net/http"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	tiktoken "github.com/pkoukk/tiktoken-go"
@@ -41,6 +43,22 @@ func RunOpenLoopCompletionBench(
 	tkm *tiktoken.Tiktoken,
 	onProgress func(ProgressUpdate),
 ) CompletionReport {
+	var logger *RequestLogger
+	runID := time.Now().Format("20060102-150405")
+	if cfg.RequestLogging {
+		l, err := NewRequestLogger(requestLogDir, runID)
+		if err != nil {
+			return CompletionReport{
+				TotalRequests:   cfg.TotalRequests,
+				ErrorDetails:    map[string]int{fmt.Sprintf("failed to initialize request logging: %v", err): 1},
+				ErrorCategories: map[string]int{ErrorCategoryClient: 1},
+				Valid:           false,
+			}
+		}
+		logger = l
+	}
+	var reqSeq atomic.Int64
+
 	results := make(chan completionResult, cfg.TotalRequests)
 	semaphore := make(chan struct{}, cfg.MaxInFlight)
 
@@ -100,12 +118,17 @@ func RunOpenLoopCompletionBench(
 			queueTime = 0
 		}
 
+		reqID := ""
+		if logger != nil {
+			reqID = fmt.Sprintf("%s-%06d", runID, reqSeq.Add(1))
+		}
+
 		wg.Add(1)
-		go func(qt time.Duration) {
+		go func(qt time.Duration, id string) {
 			defer wg.Done()
 			defer func() { <-semaphore }() // release slot
 
-			res := doCompletionRequest(ctx, client, provider, cfg, testText, actualInputTokens, tkm, "", nil)
+			res := doCompletionRequest(ctx, client, provider, cfg, testText, actualInputTokens, tkm, id, logger)
 			res.QueueTime = qt
 			results <- res
 
@@ -125,13 +148,17 @@ func RunOpenLoopCompletionBench(
 				}
 				onProgress(update)
 			}
-		}(queueTime)
+		}(queueTime, reqID)
 	}
 
 waitForInFlight:
 	wg.Wait()
 	close(results)
 	wallTime := time.Since(startTime)
+
+	if logger != nil {
+		logger.Close()
+	}
 
 	// Aggregate results (same logic as RunCompletionBench).
 	var (
@@ -229,6 +256,14 @@ waitForInFlight:
 			report.QueueTimeP50 = percentile(queueTimes, 0.50)
 			report.QueueTimeP90 = percentile(queueTimes, 0.90)
 			report.QueueTimeP99 = percentile(queueTimes, 0.99)
+		}
+	}
+	if logger != nil {
+		report.LogRequestsFile = logger.RequestsFile()
+		report.LogResponsesFile = logger.ResponsesFile()
+		report.LogDroppedCount = int(logger.DroppedCount())
+		if err := logger.Err(); err != nil {
+			report.LogError = err.Error()
 		}
 	}
 	return report
