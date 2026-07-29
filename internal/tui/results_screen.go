@@ -372,6 +372,20 @@ func (m resultsModel) renderCompletionSingle(sb *strings.Builder) {
 		})
 	}
 
+	if r.LogRequestsFile != "" {
+		sb.WriteString("\n")
+		sb.WriteString(dimStyle.Render(fmt.Sprintf("  Logs: %s / %s", r.LogRequestsFile, r.LogResponsesFile)))
+		sb.WriteString("\n")
+		if r.LogDroppedCount > 0 {
+			sb.WriteString(errorStyle.Render(fmt.Sprintf("  ⚠ %d log entries dropped (disk too slow)", r.LogDroppedCount)))
+			sb.WriteString("\n")
+		}
+		if r.LogError != "" {
+			sb.WriteString(errorStyle.Render(fmt.Sprintf("  ⚠ log write error: %s", r.LogError)))
+			sb.WriteString("\n")
+		}
+	}
+
 	if r.ErrorCount > 0 {
 		sb.WriteString("\n")
 		sb.WriteString(errorStyle.Render(fmt.Sprintf("  %d request(s) failed.", r.ErrorCount)))
