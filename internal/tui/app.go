@@ -289,7 +289,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.screen = ScreenSingleResponseConfig
 				return m, m.singleResponseConfig.inputs[0].Focus()
 			case "cache_hit":
-				m.cacheHitConfig = newCacheHitConfig()
+				m.cacheHitConfig = newCacheHitConfig(m.apiMode)
 				m.cacheHitConfig.setWidth(m.width)
 				m.screen = ScreenCacheHitConfig
 				return m, m.cacheHitConfig.inputs[0].Focus()

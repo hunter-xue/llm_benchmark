@@ -251,7 +251,7 @@ func doSingleAnthropic(t *testing.T, server *httptest.Server, ttftReasoning bool
 		TTFTIncludesReasoning: ttftReasoning,
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
-	return doAnthropicRequest(context.Background(), client, provider, cfg, "test prompt", 2, tkm)
+	return doAnthropicRequest(context.Background(), client, provider, cfg, "test prompt", 2, tkm, "", nil)
 }
 
 func TestDoAnthropicRequest_TTFTIncludesThinking(t *testing.T) {

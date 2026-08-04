@@ -32,8 +32,11 @@ internal/
     stats.go                    -- percentile, average, EmbeddingReport, CompletionReport structs
     embedding.go                -- RunEmbeddingBench (concurrent, returns report)
     completion.go               -- RunCompletionBench + doCompletionRequest (streaming SSE)
-    openloop.go                 -- RunOpenLoopCompletionBench (Poisson arrival + semaphore concurrency)
+    anthropic.go                -- RunAnthropicMessagesBench + Anthropic SSE parsing + request logging
+    openloop.go                 -- RunOpenLoopCompletionBench (Poisson arrival; OpenAI or Anthropic by Mode)
+    cache_hit.go                -- RunCacheHitTest (Completions cached_tokens / Anthropic cache_read+cache_creation)
     report_markdown.go          -- Markdown report generation (MarkdownBenchReport, MarkdownCacheHitReport) + WriteMarkdownReport
+    request_log.go              -- Async request/response JSONL logger
   tui/
     app.go                      -- Root Model, screen state machine, global prog var
     styles.go                   -- lipgloss style constants
@@ -65,9 +68,9 @@ ModeSelect -> TestModeSelect -> ConfigScreen -> RunningScreen -> ResultsScreen
 
 - **Single provider**: Benchmark one API endpoint.
 - **PK mode**: Benchmark two providers simultaneously with the same parameters. Results shown side by side with the winner (better metric) highlighted in green.
-- **Single Response View**: Send one non-streaming prompt to one completion provider and inspect headers plus raw JSON.
-- **Response Compare**: Send the same non-streaming prompt to two completion providers and compare headers plus raw JSON side by side.
-- **Prompt Cache Hit Test**: Repeat one user-entered Chat Completions prompt and report cached tokens from `usage.prompt_tokens_details.cached_tokens`.
+- **Single Response View**: Send one non-streaming prompt to one completion-like provider and inspect headers plus raw JSON.
+- **Response Compare**: Send the same non-streaming prompt to two completion-like providers and compare headers plus raw JSON side by side.
+- **Prompt Cache Hit Test**: Repeat one user-entered prompt and report cache hits. Chat Completions reads `usage.prompt_tokens_details.cached_tokens`; Anthropic Messages reads `cache_read_input_tokens` / `cache_creation_input_tokens` (and auto-injects top-level `cache_control` unless Custom Params already set it).
 
 ### Key Design Decisions
 
@@ -75,9 +78,9 @@ ModeSelect -> TestModeSelect -> ConfigScreen -> RunningScreen -> ResultsScreen
 - **Benchmark input generation**: Main benchmark modes generate exact-length prompts from the embedded natural sentence pool. `GenerateMeaningfulTextByTokens` strictly matches `TargetTokens`; `GenerateTextByTokens` remains as a fallback.
 - **API usage reporting**: Completion reports keep local tiktoken-based performance counters and separately aggregate API-returned raw token usage fields (`APIPromptTokens`, `APICompletionTokens`, `APITotalTokens`, `APIUsageCount`, `MissingAPIUsageCount`). OpenAI-compatible streaming requests default to `stream_options.include_usage=true`; Custom Params can override it. Missing usage is shown as `N/A`, never counted as zero.
 - **TTFT semantics**: For completion-like modes, the `TTFT Includes Reasoning` config toggle (default on) controls whether the first reasoning token stops the TTFT clock — `reasoning_content`/`reasoning` delta fields for OpenAI-compatible APIs, `thinking_delta` events for Anthropic. Request success still requires answer content (reasoning-only streams are errors), and reasoning text never enters OutputTokens/TPOT statistics. Providers that inline `<think>` tags in content are indistinguishable from answer text and always count as content.
-- **Request logging**: Chat Completion single-provider benchmarks can enable `Request Logging` (config toggle, default off). Every request/response (headers + exact wire body + raw SSE lines) is written to `bench_requests_<runID>.jsonl` / `bench_responses_<runID>.jsonl` in the working directory, correlated by `request_id` (`<runID>-<6-digit seq>`, local only). Fully asynchronous: request goroutines enqueue raw data via non-blocking sends (drop-on-full, counted in `CompletionReport.LogDroppedCount`), and all serialization/disk IO happens in a single writer goroutine — logging never delays TTFT/E2E/TPOT or wall time. The `Authorization` header is redacted (`Bearer ***last4`). Results screen shows the log paths plus drop/write-error warnings.
+- **Request logging**: Completion-like single-provider benchmarks (Chat Completions and Anthropic Messages) can enable `Request Logging` (config toggle, default off). Every request/response (headers + exact wire body + raw SSE lines) is written to `bench_requests_<runID>.jsonl` / `bench_responses_<runID>.jsonl` in the working directory, correlated by `request_id` (`<runID>-<6-digit seq>`, local only). Fully asynchronous: request goroutines enqueue raw data via non-blocking sends (drop-on-full, counted in `CompletionReport.LogDroppedCount`), and all serialization/disk IO happens in a single writer goroutine — logging never delays TTFT/E2E/TPOT or wall time. The `Authorization` header is redacted (`Bearer ***last4`); Anthropic `x-api-key` is redacted (`***last4`). Results screen shows the log paths plus drop/write-error warnings.
 - **Auto markdown report**: When a benchmark (all providers done) or cache-hit run completes, `app.go` writes `bench_report_<YYYYMMDD_HHMMSS>.md` / `cache_hit_report_<YYYYMMDD_HHMMSS>.md` to the working directory via `bench.MarkdownBenchReport` / `MarkdownCacheHitReport` / `WriteMarkdownReport` (PK mode = one combined file). The file records test parameters (API key redacted `***last4`) and the same metrics as the results screen in markdown tables (PK winner **bold**, invalid provider `N/A`), plus log file names when Request Logging was on. Results screens show `Report saved: <name>` or a write-failure warning. Write errors never affect result display. Cancelled runs (`esc` on the running screen) skip the write — it is gated on the current screen. The manual `ctrl+e` plain-text export is unchanged. Tests redirect output via the unexported `markdownReportDir` package var in `tui`.
-- **Concurrency model**: Two modes selectable via Load Model toggle in config screen (Chat Completion only):
+- **Concurrency model**: Two modes selectable via Load Model toggle in config screen (Chat Completion and Anthropic Messages):
   - **Closed-loop** (default): Buffered `taskQueue` channel pre-filled with N tasks; `concurrency` goroutines drain it.
   - **Open-loop**: Generator goroutine produces requests at Poisson intervals (`Request Rate` req/s); semaphore limits max in-flight requests (`Max In-Flight`). Queue time measured per request.
 - **Progress reporting**: Benchmark goroutines call `prog.Send(ProgressMsg{...})` where `prog` is a package-level `*tea.Program` set before `p.Run()`.
@@ -94,7 +97,7 @@ type BenchConfig struct {
     RequestRate int         // open-loop: requests per second
     MaxInFlight int         // open-loop: max concurrent in-flight
     TTFTIncludesReasoning bool // completion-like: first reasoning/thinking token stops the TTFT clock
-    RequestLogging bool      // completion single-provider: async request/response JSONL logging
+    RequestLogging bool      // completion-like single-provider: async request/response JSONL logging
 }
 type EmbeddingReport struct { ...; ErrorDetails, ErrorCategories map[string]int; Valid bool }
 type CompletionReport struct { ...; APIPromptTokens, APICompletionTokens, APITotalTokens, APIUsageCount, MissingAPIUsageCount int; ErrorDetails, ErrorCategories map[string]int; Valid bool }

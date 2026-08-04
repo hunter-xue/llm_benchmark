@@ -115,7 +115,7 @@ func mdSharedBenchParams(apiMode, testMode string, cfg BenchConfig) [][]string {
 		)
 	} else {
 		rows = append(rows, []string{"Concurrency", fmt.Sprintf("%d", cfg.Concurrency)})
-		if apiMode == ModeCompletion {
+		if isCompletionLike {
 			rows = append(rows, []string{"Load Model", LoadModelClosedLoop})
 		}
 	}
@@ -130,7 +130,7 @@ func mdSharedBenchParams(apiMode, testMode string, cfg BenchConfig) [][]string {
 			rows = append(rows, []string{"System Prompt", cfg.SystemPrompt})
 		}
 	}
-	if apiMode == ModeCompletion && testMode == "single" {
+	if isCompletionLike && testMode == "single" {
 		rows = append(rows, []string{"Request Logging", strconv.FormatBool(cfg.RequestLogging)})
 	}
 	return rows
@@ -571,12 +571,22 @@ func MarkdownCacheHitReport(provider ProviderConfig, cfg CacheHitConfig, userPro
 	sb.WriteString("# Prompt Cache Hit Report\n\n")
 	sb.WriteString("Generated: " + now.Format("2006-01-02 15:04:05") + "\n\n")
 
+	apiMode := cfg.APIMode
+	if apiMode == "" && r != nil && r.APIMode != "" {
+		apiMode = r.APIMode
+	}
+	if apiMode == "" {
+		apiMode = ModeCompletion
+	}
+	isAnthropic := apiMode == ModeAnthropicMessages
+
 	sb.WriteString("## Test Parameters\n\n")
 	interval := cfg.Interval
 	if interval <= 0 {
 		interval = 3 * time.Second // same default as RunCacheHitTest
 	}
 	params := [][]string{
+		{"API Mode", apiMode},
 		{"Provider", provider.Name},
 		{"URL", provider.URL},
 		{"Model", provider.Model},
@@ -605,16 +615,28 @@ func MarkdownCacheHitReport(provider ProviderConfig, cfg CacheHitConfig, userPro
 	summary = append(summary, []string{"Wall Time", fmt.Sprintf("%.2f s", r.WallTime.Seconds())})
 	mdTable(&sb, "Metric", "Value", summary)
 
+	inputLabel := "Prompt Tokens"
+	cachedLabel := "Cached Tokens"
+	if isAnthropic {
+		inputLabel = "Input Tokens"
+		cachedLabel = "Cache Read Tokens"
+	}
+
 	if !r.Valid {
 		sb.WriteString("_All requests failed — no cache metrics available._\n\n")
 	} else {
 		metrics := [][]string{
-			{"Prompt Tokens", fmt.Sprintf("%d", r.TotalPromptTokens)},
-			{"Cached Tokens", fmt.Sprintf("%d", r.TotalCachedTokens)},
-			{"Overall Hit Rate", fmt.Sprintf("%.2f%%", r.CacheHitRate)},
-			{"Avg Request Hit Rate", fmt.Sprintf("%.2f%%", r.AvgRequestHitRate)},
-			{"Avg Latency", mdFmtMs(r.AvgLatencyMs)},
+			{inputLabel, fmt.Sprintf("%d", r.TotalPromptTokens)},
+			{cachedLabel, fmt.Sprintf("%d", r.TotalCachedTokens)},
 		}
+		if isAnthropic {
+			metrics = append(metrics, []string{"Cache Creation Tokens", fmt.Sprintf("%d", r.TotalCacheCreationTokens)})
+		}
+		metrics = append(metrics,
+			[]string{"Overall Hit Rate", fmt.Sprintf("%.2f%%", r.CacheHitRate)},
+			[]string{"Avg Request Hit Rate", fmt.Sprintf("%.2f%%", r.AvgRequestHitRate)},
+			[]string{"Avg Latency", mdFmtMs(r.AvgLatencyMs)},
+		)
 		if r.MissingUsageCount > 0 {
 			metrics = append(metrics, []string{"Missing Usage", fmt.Sprintf("%d", r.MissingUsageCount)})
 		}
@@ -625,23 +647,41 @@ func MarkdownCacheHitReport(provider ProviderConfig, cfg CacheHitConfig, userPro
 	}
 
 	sb.WriteString("## Per-Request Results\n\n")
-	sb.WriteString("| # | Latency | Prompt | Cached | Hit Rate |\n")
-	sb.WriteString("|---|---|---|---|---|\n")
+	if isAnthropic {
+		sb.WriteString("| # | Latency | Input | Cache Read | Cache Creation | Hit Rate |\n")
+		sb.WriteString("|---|---|---|---|---|---|\n")
+	} else {
+		sb.WriteString("| # | Latency | Prompt | Cached | Hit Rate |\n")
+		sb.WriteString("|---|---|---|---|---|\n")
+	}
 	for _, res := range r.Results {
 		if res.Err != nil {
-			fmt.Fprintf(&sb, "| %d | error: %s | | | |\n", res.Index, mdEscape(res.Err.Error()))
+			if isAnthropic {
+				fmt.Fprintf(&sb, "| %d | error: %s | | | | |\n", res.Index, mdEscape(res.Err.Error()))
+			} else {
+				fmt.Fprintf(&sb, "| %d | error: %s | | | |\n", res.Index, mdEscape(res.Err.Error()))
+			}
 			continue
 		}
 		cached := "N/A"
 		hitRate := "N/A"
 		if res.HasCachedTokens {
 			cached = fmt.Sprintf("%d", res.CachedTokens)
-			if res.PromptTokens > 0 {
-				hitRate = fmt.Sprintf("%.2f%%", float64(res.CachedTokens)/float64(res.PromptTokens)*100)
+			if denom := cacheHitInputTotal(res, apiMode); denom > 0 {
+				hitRate = fmt.Sprintf("%.2f%%", float64(res.CachedTokens)/float64(denom)*100)
 			}
 		}
-		fmt.Fprintf(&sb, "| %d | %s | %d | %s | %s |\n",
-			res.Index, mdFmtMs(float64(res.Latency.Milliseconds())), res.PromptTokens, cached, hitRate)
+		if isAnthropic {
+			creation := "N/A"
+			if res.HasCacheCreation {
+				creation = fmt.Sprintf("%d", res.CacheCreationTokens)
+			}
+			fmt.Fprintf(&sb, "| %d | %s | %d | %s | %s | %s |\n",
+				res.Index, mdFmtMs(float64(res.Latency.Milliseconds())), res.PromptTokens, cached, creation, hitRate)
+		} else {
+			fmt.Fprintf(&sb, "| %d | %s | %d | %s | %s |\n",
+				res.Index, mdFmtMs(float64(res.Latency.Milliseconds())), res.PromptTokens, cached, hitRate)
+		}
 	}
 	return sb.String()
 }

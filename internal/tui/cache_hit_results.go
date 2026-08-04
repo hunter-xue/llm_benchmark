@@ -44,6 +44,10 @@ func (m cacheHitResultsModel) errorCategories() map[string]int {
 	return m.report.ErrorCategories
 }
 
+func (m cacheHitResultsModel) isAnthropic() bool {
+	return m.report != nil && m.report.APIMode == bench.ModeAnthropicMessages
+}
+
 func (m cacheHitResultsModel) view(width, height int) string {
 	return m.render(true)
 }
@@ -66,6 +70,7 @@ func (m cacheHitResultsModel) render(withStatus bool) string {
 	if r.TotalRequests > 0 {
 		successPct = float64(r.SuccessCount) / float64(r.TotalRequests) * 100
 	}
+	isAnthropic := m.isAnthropic()
 
 	renderTwoColTable(&sb, [][]string{
 		{"Total Requests", fmt.Sprintf("%d", r.TotalRequests)},
@@ -91,13 +96,25 @@ func (m cacheHitResultsModel) render(withStatus bool) string {
 
 	sb.WriteString(dimStyle.Render("  " + strings.Repeat("-", 48)))
 	sb.WriteString("\n")
-	renderTwoColTable(&sb, [][]string{
-		{"Prompt Tokens", fmt.Sprintf("%d", r.TotalPromptTokens)},
-		{"Cached Tokens", fmt.Sprintf("%d", r.TotalCachedTokens)},
-		{"Overall Hit Rate", fmt.Sprintf("%.2f%%", r.CacheHitRate)},
-		{"Avg Request Hit Rate", fmt.Sprintf("%.2f%%", r.AvgRequestHitRate)},
-		{"Avg Latency", fmtMs(r.AvgLatencyMs)},
-	})
+	inputLabel := "Prompt Tokens"
+	cachedLabel := "Cached Tokens"
+	if isAnthropic {
+		inputLabel = "Input Tokens"
+		cachedLabel = "Cache Read Tokens"
+	}
+	summaryRows := [][]string{
+		{inputLabel, fmt.Sprintf("%d", r.TotalPromptTokens)},
+		{cachedLabel, fmt.Sprintf("%d", r.TotalCachedTokens)},
+	}
+	if isAnthropic {
+		summaryRows = append(summaryRows, []string{"Cache Creation Tokens", fmt.Sprintf("%d", r.TotalCacheCreationTokens)})
+	}
+	summaryRows = append(summaryRows,
+		[]string{"Overall Hit Rate", fmt.Sprintf("%.2f%%", r.CacheHitRate)},
+		[]string{"Avg Request Hit Rate", fmt.Sprintf("%.2f%%", r.AvgRequestHitRate)},
+		[]string{"Avg Latency", fmtMs(r.AvgLatencyMs)},
+	)
+	renderTwoColTable(&sb, summaryRows)
 	if r.MissingUsageCount > 0 || r.MissingCachedCount > 0 {
 		renderTwoColTable(&sb, [][]string{
 			{"Missing Usage", fmt.Sprintf("%d", r.MissingUsageCount)},
@@ -106,9 +123,13 @@ func (m cacheHitResultsModel) render(withStatus bool) string {
 	}
 
 	sb.WriteString("\n")
-	sb.WriteString(dimStyle.Render("  #    Latency       Prompt    Cached    Hit Rate"))
+	if isAnthropic {
+		sb.WriteString(dimStyle.Render("  #    Latency       Input     CacheRead Creation  Hit Rate"))
+	} else {
+		sb.WriteString(dimStyle.Render("  #    Latency       Prompt    Cached    Hit Rate"))
+	}
 	sb.WriteString("\n")
-	sb.WriteString(dimStyle.Render("  " + strings.Repeat("-", 48)))
+	sb.WriteString(dimStyle.Render("  " + strings.Repeat("-", 56)))
 	sb.WriteString("\n")
 	for _, result := range r.Results {
 		if result.Err != nil {
@@ -119,17 +140,36 @@ func (m cacheHitResultsModel) render(withStatus bool) string {
 		hitRate := "N/A"
 		if result.HasCachedTokens {
 			cached = fmt.Sprintf("%d", result.CachedTokens)
-			if result.PromptTokens > 0 {
-				hitRate = fmt.Sprintf("%.2f%%", float64(result.CachedTokens)/float64(result.PromptTokens)*100)
+			denom := result.PromptTokens
+			if isAnthropic {
+				denom = result.PromptTokens + result.CacheCreationTokens + result.CachedTokens
+			}
+			if denom > 0 {
+				hitRate = fmt.Sprintf("%.2f%%", float64(result.CachedTokens)/float64(denom)*100)
 			}
 		}
-		sb.WriteString(fmt.Sprintf("  %-4d %-12s %-9d %-9s %s\n",
-			result.Index,
-			fmtMs(float64(result.Latency.Milliseconds())),
-			result.PromptTokens,
-			cached,
-			hitRate,
-		))
+		if isAnthropic {
+			creation := "N/A"
+			if result.HasCacheCreation {
+				creation = fmt.Sprintf("%d", result.CacheCreationTokens)
+			}
+			sb.WriteString(fmt.Sprintf("  %-4d %-12s %-9d %-9s %-9s %s\n",
+				result.Index,
+				fmtMs(float64(result.Latency.Milliseconds())),
+				result.PromptTokens,
+				cached,
+				creation,
+				hitRate,
+			))
+		} else {
+			sb.WriteString(fmt.Sprintf("  %-4d %-12s %-9d %-9s %s\n",
+				result.Index,
+				fmtMs(float64(result.Latency.Milliseconds())),
+				result.PromptTokens,
+				cached,
+				hitRate,
+			))
+		}
 	}
 
 	sb.WriteString("\n")

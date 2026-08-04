@@ -27,9 +27,9 @@ type configModel struct {
 	focusIndex       int
 	err              string
 	width            int
-	loadModelIndex   int  // 0 = closed-loop, 1 = open-loop (completion only)
+	loadModelIndex   int  // 0 = closed-loop, 1 = open-loop (completion-like modes)
 	ttftReasoningOn  bool // TTFT Includes Reasoning toggle (completion-like modes)
-	requestLoggingOn bool // Request Logging toggle (completion single-provider only)
+	requestLoggingOn bool // Request Logging toggle (completion-like single-provider only)
 }
 
 func newConfigModel(apiMode, testMode string) configModel {
@@ -85,7 +85,7 @@ func buildFieldDefs(apiMode, testMode string, loadModelIndex int) []fieldDef {
 	isAnthropicMsg := apiMode == "anthropic_messages"
 	isCompletionLike := isCompletion || isAnthropicMsg
 	isPK := testMode == "pk"
-	isOpenLoop := isCompletion && loadModelIndex == 1
+	isOpenLoop := isCompletionLike && loadModelIndex == 1
 
 	customParamsPlaceholder := `optional JSON, e.g. {"temperature":0.7}`
 
@@ -94,7 +94,7 @@ func buildFieldDefs(apiMode, testMode string, loadModelIndex int) []fieldDef {
 		maxTokPlaceholder = "e.g. 4096  (0 → defaults to 4096)"
 	}
 
-	// Load Model toggle field (only for completion mode)
+	// Load Model toggle field (completion-like modes)
 	loadModelField := fieldDef{
 		label:     "Load Model",
 		fieldType: "toggle",
@@ -106,7 +106,7 @@ func buildFieldDefs(apiMode, testMode string, loadModelIndex int) []fieldDef {
 		fieldType: "toggle",
 	}
 
-	// Request Logging toggle field (completion single-provider only)
+	// Request Logging toggle field (completion-like single-provider only)
 	requestLoggingField := fieldDef{
 		label:     "Request Logging",
 		fieldType: "toggle",
@@ -147,8 +147,8 @@ func buildFieldDefs(apiMode, testMode string, loadModelIndex int) []fieldDef {
 			{label: "Provider B Model", placeholder: modelPlaceholderB},
 			{label: "Custom Params", placeholder: customParamsPlaceholder},
 		}
-		// Add Load Model toggle for completion mode
-		if isCompletion {
+		// Add Load Model toggle for completion-like modes
+		if isCompletionLike {
 			defs = append(defs, loadModelField)
 		}
 		// Add concurrency fields based on load model
@@ -189,8 +189,8 @@ func buildFieldDefs(apiMode, testMode string, loadModelIndex int) []fieldDef {
 		{label: "Model", placeholder: modelPlaceholder},
 		{label: "Custom Params", placeholder: customParamsPlaceholder},
 	}
-	// Add Load Model toggle for completion mode
-	if isCompletion {
+	// Add Load Model toggle for completion-like modes
+	if isCompletionLike {
 		defs = append(defs, loadModelField)
 	}
 	// Add concurrency fields based on load model
@@ -210,7 +210,7 @@ func buildFieldDefs(apiMode, testMode string, loadModelIndex int) []fieldDef {
 			fieldDef{label: "System Prompt", placeholder: "optional, leave blank to skip"},
 		)
 	}
-	if isCompletion {
+	if isCompletionLike {
 		defs = append(defs, requestLoggingField)
 	}
 	return defs
@@ -230,8 +230,8 @@ func (m configModel) isToggleField() bool {
 
 // toggleLoadModel switches between closed-loop and open-loop, rebuilding fields.
 func (m *configModel) toggleLoadModel() {
-	if m.apiMode != bench.ModeCompletion {
-		return // only completion mode supports open-loop
+	if m.apiMode != bench.ModeCompletion && m.apiMode != bench.ModeAnthropicMessages {
+		return // only completion-like modes support open-loop
 	}
 	m.loadModelIndex = 1 - m.loadModelIndex // toggle 0↔1
 	m.rebuildFields()
@@ -294,7 +294,7 @@ func (m configModel) validate() ([]bench.ProviderConfig, bench.BenchConfig, erro
 	isCompletion := m.apiMode == "completion"
 	isAnthropicMsg := m.apiMode == "anthropic_messages"
 	isCompletionLike := isCompletion || isAnthropicMsg
-	isOpenLoop := isCompletion && m.loadModelIndex == 1
+	isOpenLoop := isCompletionLike && m.loadModelIndex == 1
 
 	parseInt := func(s, name string) (int, error) {
 		v, err := strconv.Atoi(s)
@@ -480,8 +480,6 @@ func (m configModel) validate() ([]bench.ProviderConfig, bench.BenchConfig, erro
 		cfg.MaxOutputTokens = maxTok
 		cfg.SystemPrompt = vals[fieldIdx("System Prompt")]
 		cfg.TTFTIncludesReasoning = m.ttftReasoningOn
-	}
-	if isCompletion {
 		cfg.RequestLogging = m.requestLoggingOn
 	}
 	providers := []bench.ProviderConfig{

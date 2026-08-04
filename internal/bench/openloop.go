@@ -128,7 +128,12 @@ func RunOpenLoopCompletionBench(
 			defer wg.Done()
 			defer func() { <-semaphore }() // release slot
 
-			res := doCompletionRequest(ctx, client, provider, cfg, testText, actualInputTokens, tkm, id, logger)
+			var res completionResult
+			if cfg.Mode == ModeAnthropicMessages {
+				res = doAnthropicRequest(ctx, client, provider, cfg, testText, actualInputTokens, tkm, id, logger)
+			} else {
+				res = doCompletionRequest(ctx, client, provider, cfg, testText, actualInputTokens, tkm, id, logger)
+			}
 			res.QueueTime = qt
 			results <- res
 

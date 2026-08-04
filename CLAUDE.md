@@ -32,8 +32,11 @@ internal/
     stats.go                    -- percentile, average, EmbeddingReport, CompletionReport structs
     embedding.go                -- RunEmbeddingBench (concurrent, returns report)
     completion.go               -- RunCompletionBench + doCompletionRequest (streaming SSE)
-    anthropic.go                -- RunAnthropicMessagesBench + Anthropic SSE parsing
-    cache_hit.go                -- RunCacheHitTest + usage.prompt_tokens_details.cached_tokens parsing
+    anthropic.go                -- RunAnthropicMessagesBench + Anthropic SSE parsing + request logging
+    openloop.go                 -- RunOpenLoopCompletionBench (Poisson arrival; OpenAI or Anthropic by Mode)
+    cache_hit.go                -- RunCacheHitTest (Completions cached_tokens / Anthropic cache_read+cache_creation)
+    report_markdown.go          -- Markdown report generation (MarkdownBenchReport, MarkdownCacheHitReport) + WriteMarkdownReport
+    request_log.go              -- Async request/response JSONL logger
   tui/
     app.go                      -- Root Model, screen state machine, global prog var
     styles.go                   -- lipgloss style constants
@@ -71,16 +74,16 @@ ModeSelect -> TestModeSelect -> ConfigScreen -> RunningScreen -> ResultsScreen
 
 - **Single provider**: Benchmark one API endpoint.
 - **PK mode**: Benchmark two providers simultaneously with the same parameters. Results shown side by side with the winner (better metric) highlighted in green.
-- **Single Response View**: Send one non-streaming prompt to one completion provider and inspect headers plus raw JSON.
-- **Response Compare**: Send the same non-streaming prompt to two completion providers and compare headers plus raw JSON side by side.
-- **Prompt Cache Hit Test**: Repeat one user-entered Chat Completions prompt and report cached tokens from `usage.prompt_tokens_details.cached_tokens`.
+- **Single Response View**: Send one non-streaming prompt to one completion-like provider and inspect headers plus raw JSON.
+- **Response Compare**: Send the same non-streaming prompt to two completion-like providers and compare headers plus raw JSON side by side.
+- **Prompt Cache Hit Test**: Repeat one user-entered prompt and report cache hits. Chat Completions reads `usage.prompt_tokens_details.cached_tokens`; Anthropic Messages reads `cache_read_input_tokens` / `cache_creation_input_tokens` (and auto-injects top-level `cache_control` unless Custom Params already set it).
 
 ### Key Design Decisions
 
 - **Token counting**: Uses `tiktoken-go` with the embedded `cl100k_base` encoding (offline only — `offlineOnlyBpeLoader` blocks network downloads). `--bpe-file` optionally overrides the embedded BPE file.
 - **Benchmark input generation**: Main benchmark modes generate exact-length prompts from the embedded natural sentence pool. `GenerateMeaningfulTextByTokens` strictly matches `TargetTokens`; `GenerateTextByTokens` remains as a fallback.
 - **API usage reporting**: Completion reports keep local tiktoken-based performance counters and separately aggregate API-returned raw token usage fields (`APIPromptTokens`, `APICompletionTokens`, `APITotalTokens`, `APIUsageCount`, `MissingAPIUsageCount`). OpenAI-compatible streaming requests default to `stream_options.include_usage=true`; Custom Params can override it. Missing usage is shown as `N/A`, never counted as zero.
-- **Concurrency model**: Buffered `taskQueue` channel pre-filled with N tasks; `concurrency` goroutines drain it.
+- **Concurrency model**: Two modes via Load Model toggle (Chat Completion and Anthropic Messages): closed-loop (default) or open-loop (Poisson arrival + Max In-Flight semaphore + QueueTime).
 - **Progress reporting**: Benchmark goroutines call `prog.Send(ProgressMsg{...})` where `prog` is a package-level `*tea.Program` set before `p.Run()`.
 - **Error log**: Raw errors are collected in `ErrorDetails map[string]int`; stable categories are counted in `ErrorCategories map[string]int`. Press `e` during/after benchmark to view category summaries plus raw details in a scrollable viewport overlay.
 

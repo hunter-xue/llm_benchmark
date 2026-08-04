@@ -238,3 +238,43 @@ func TestRunOpenLoopCompletionBench_QueueTimeNonNegative(t *testing.T) {
 		t.Error("QueueTimeAvg should be > 0 when requests queue behind MaxInFlight=1")
 	}
 }
+
+func mockAnthropicMessagesServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher := w.(http.Flusher)
+		fmt.Fprintf(w, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n\n")
+		flusher.Flush()
+		fmt.Fprintf(w, "event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":1}}\n\n")
+		flusher.Flush()
+		fmt.Fprintf(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+		flusher.Flush()
+	}))
+}
+
+func TestRunOpenLoopCompletionBench_Anthropic(t *testing.T) {
+	server := mockAnthropicMessagesServer(t)
+	defer server.Close()
+
+	tkm := testTokenizer(t)
+	provider := ProviderConfig{URL: server.URL, Model: "claude-test", APIKey: "sk-ant-test"}
+	cfg := BenchConfig{
+		Mode:          ModeAnthropicMessages,
+		LoadModel:     LoadModelOpenLoop,
+		TotalRequests: 3,
+		RequestRate:   1000,
+		MaxInFlight:   2,
+	}
+
+	report := RunOpenLoopCompletionBench(
+		context.Background(), provider, cfg, "test", 1, tkm, nil,
+	)
+	if report.SuccessCount != 3 {
+		t.Fatalf("expected 3 successful requests, got %d (errors: %v)", report.SuccessCount, report.ErrorDetails)
+	}
+	if report.QueueTimeAvg < 0 {
+		t.Errorf("QueueTimeAvg should be >= 0, got %f", report.QueueTimeAvg)
+	}
+}

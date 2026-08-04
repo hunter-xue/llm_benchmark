@@ -107,11 +107,11 @@ func startBench(
 			if cfg.Mode == bench.ModeEmbedding {
 				r := bench.RunEmbeddingBench(ctx, pv, cfg, testText, actualTokens, onProgress)
 				p.Send(BenchDoneMsg{ProviderIndex: idx, EmbeddingReport: &r})
-			} else if cfg.Mode == bench.ModeAnthropicMessages {
-				r := bench.RunAnthropicMessagesBench(ctx, pv, cfg, testText, actualTokens, tkm, onProgress)
-				p.Send(BenchDoneMsg{ProviderIndex: idx, CompletionReport: &r})
 			} else if cfg.LoadModel == bench.LoadModelOpenLoop {
 				r := bench.RunOpenLoopCompletionBench(ctx, pv, cfg, testText, actualTokens, tkm, onProgress)
+				p.Send(BenchDoneMsg{ProviderIndex: idx, CompletionReport: &r})
+			} else if cfg.Mode == bench.ModeAnthropicMessages {
+				r := bench.RunAnthropicMessagesBench(ctx, pv, cfg, testText, actualTokens, tkm, onProgress)
 				p.Send(BenchDoneMsg{ProviderIndex: idx, CompletionReport: &r})
 			} else {
 				r := bench.RunCompletionBench(ctx, pv, cfg, testText, actualTokens, tkm, onProgress)

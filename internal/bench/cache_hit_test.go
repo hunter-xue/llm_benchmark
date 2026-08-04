@@ -118,6 +118,101 @@ func TestRunCacheHitTestRecordsErrors(t *testing.T) {
 	}
 }
 
+func TestRunCacheHitTestAnthropicCacheTokens(t *testing.T) {
+	var requests int
+	var sawCacheControl bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.Header.Get("x-api-key") == "" {
+			t.Error("expected x-api-key header")
+		}
+		if r.Header.Get("anthropic-version") == "" {
+			t.Error("expected anthropic-version header")
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if body["stream"] != false {
+			t.Fatalf("stream = %v, want false", body["stream"])
+		}
+		if _, ok := body["cache_control"]; ok {
+			sawCacheControl = true
+		}
+		w.Header().Set("Content-Type", "application/json")
+		cacheRead := 0
+		cacheCreate := 1024
+		if requests > 1 {
+			cacheRead = 1024
+			cacheCreate = 0
+		}
+		_, _ = w.Write([]byte(`{
+			"usage": {
+				"input_tokens": 200,
+				"output_tokens": 1,
+				"cache_creation_input_tokens": ` + jsonInt(cacheCreate) + `,
+				"cache_read_input_tokens": ` + jsonInt(cacheRead) + `
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	report := RunCacheHitTest(context.Background(),
+		ProviderConfig{URL: server.URL, APIKey: "sk-ant-test", Model: "claude-test"},
+		CacheHitConfig{
+			APIMode:         ModeAnthropicMessages,
+			TestCount:       2,
+			MaxOutputTokens: 1,
+			Interval:        time.Nanosecond,
+		},
+		"large prompt",
+		nil,
+	)
+
+	if !sawCacheControl {
+		t.Fatal("expected cache_control to be injected into Anthropic requests")
+	}
+	if report.APIMode != ModeAnthropicMessages {
+		t.Fatalf("APIMode = %q, want %q", report.APIMode, ModeAnthropicMessages)
+	}
+	if report.SuccessCount != 2 {
+		t.Fatalf("success = %d, want 2", report.SuccessCount)
+	}
+	if report.TotalPromptTokens != 400 {
+		t.Fatalf("total input tokens = %d, want 400", report.TotalPromptTokens)
+	}
+	if report.TotalCachedTokens != 1024 {
+		t.Fatalf("total cache read = %d, want 1024", report.TotalCachedTokens)
+	}
+	if report.TotalCacheCreationTokens != 1024 {
+		t.Fatalf("total cache creation = %d, want 1024", report.TotalCacheCreationTokens)
+	}
+	// Hit rate denom = (200+1024+0) + (200+0+1024) = 2448; cached = 1024
+	wantRate := float64(1024) / float64(2448) * 100
+	if report.CacheHitRate < wantRate-0.01 || report.CacheHitRate > wantRate+0.01 {
+		t.Fatalf("CacheHitRate = %.4f, want ~%.4f", report.CacheHitRate, wantRate)
+	}
+	if !report.Results[0].HasCacheCreation || report.Results[0].CacheCreationTokens != 1024 {
+		t.Fatalf("request 1 creation = %+v", report.Results[0])
+	}
+	if !report.Results[1].HasCachedTokens || report.Results[1].CachedTokens != 1024 {
+		t.Fatalf("request 2 cached = %+v", report.Results[1])
+	}
+}
+
+func TestEnsureAnthropicCacheControl_SkipsWhenPresent(t *testing.T) {
+	in := []byte(`{"model":"m","cache_control":{"type":"ephemeral","ttl":"1h"}}`)
+	out := ensureAnthropicCacheControl(in)
+	var obj map[string]any
+	if err := json.Unmarshal(out, &obj); err != nil {
+		t.Fatal(err)
+	}
+	cc := obj["cache_control"].(map[string]any)
+	if cc["ttl"] != "1h" {
+		t.Fatalf("cache_control overwritten: %+v", cc)
+	}
+}
+
 func jsonInt(v int) string {
 	b, _ := json.Marshal(v)
 	return string(b)

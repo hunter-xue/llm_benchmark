@@ -112,8 +112,8 @@ func (l *RequestLogger) Err() error {
 	return l.firstErr
 }
 
-// LogRequest enqueues a request entry. headerMap is cloned and Authorization
-// redacted synchronously (cheap, happens before the request is sent).
+// LogRequest enqueues a request entry. headerMap is cloned and Authorization /
+// x-api-key are redacted synchronously (cheap, happens before the request is sent).
 func (l *RequestLogger) LogRequest(reqID, method, url string, headerMap http.Header, body []byte) {
 	l.enqueue(logEntry{req: &requestLogEntry{
 		RequestID: reqID,
@@ -238,8 +238,8 @@ func logTimestamp() string {
 	return time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
 }
 
-// flattenHeaders converts http.Header to a single-valued map and redacts the
-// Authorization header. The input map is not modified.
+// flattenHeaders converts http.Header to a single-valued map and redacts
+// Authorization and x-api-key credentials. The input map is not modified.
 func flattenHeaders(h http.Header) map[string]string {
 	if len(h) == 0 {
 		return nil
@@ -249,6 +249,8 @@ func flattenHeaders(h http.Header) map[string]string {
 		v := strings.Join(vals, ", ")
 		if strings.EqualFold(k, "Authorization") {
 			v = redactAuthorization(v)
+		} else if strings.EqualFold(k, "x-api-key") {
+			v = maskCredential(v)
 		}
 		flat[k] = v
 	}

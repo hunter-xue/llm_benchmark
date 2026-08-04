@@ -13,6 +13,7 @@ import (
 )
 
 type cacheHitConfigModel struct {
+	apiMode    string
 	inputs     []textinput.Model
 	fields     []fieldDef
 	prompt     textarea.Model
@@ -28,16 +29,35 @@ type cacheHitConfigResult struct {
 	customParams string
 }
 
-func newCacheHitConfig() cacheHitConfigModel {
-	fields := []fieldDef{
-		{label: "API URL", placeholder: "https://api.openai.com/v1/chat/completions"},
-		{label: "API Key", placeholder: "sk-...", password: true},
-		{label: "Model", placeholder: "e.g. gpt-4o-mini"},
-		{label: "Custom Params", placeholder: `optional JSON, e.g. {"prompt_cache_key":"benchmark"}`},
+func buildCacheHitConfigFields(apiMode string) []fieldDef {
+	urlPlaceholder := "https://api.openai.com/v1/chat/completions"
+	keyPlaceholder := "sk-..."
+	modelPlaceholder := "e.g. gpt-4o-mini"
+	customPlaceholder := `optional JSON, e.g. {"prompt_cache_key":"benchmark"}`
+	maxTokPlaceholder := "optional, e.g. 1"
+	if apiMode == bench.ModeAnthropicMessages {
+		urlPlaceholder = "https://api.anthropic.com/v1/messages"
+		keyPlaceholder = "sk-ant-..."
+		modelPlaceholder = "e.g. claude-sonnet-4-6"
+		customPlaceholder = `optional JSON, e.g. {"temperature":0}`
+		maxTokPlaceholder = "optional, e.g. 1  (0 → defaults to 4096)"
+	}
+	return []fieldDef{
+		{label: "API URL", placeholder: urlPlaceholder},
+		{label: "API Key", placeholder: keyPlaceholder, password: true},
+		{label: "Model", placeholder: modelPlaceholder},
+		{label: "Custom Params", placeholder: customPlaceholder},
 		{label: "Test Count", placeholder: "e.g. 5"},
-		{label: "Max Output Tokens", placeholder: "optional, e.g. 1"},
+		{label: "Max Output Tokens", placeholder: maxTokPlaceholder},
 		{label: "System Prompt", placeholder: "optional, leave blank to skip"},
 	}
+}
+
+func newCacheHitConfig(apiMode string) cacheHitConfigModel {
+	if apiMode == "" {
+		apiMode = bench.ModeCompletion
+	}
+	fields := buildCacheHitConfigFields(apiMode)
 	inputs := make([]textinput.Model, len(fields))
 	for i, fd := range fields {
 		t := textinput.New()
@@ -57,7 +77,7 @@ func newCacheHitConfig() cacheHitConfigModel {
 	prompt.SetHeight(8)
 	prompt.ShowLineNumbers = false
 
-	return cacheHitConfigModel{inputs: inputs, fields: fields, prompt: prompt}
+	return cacheHitConfigModel{apiMode: apiMode, inputs: inputs, fields: fields, prompt: prompt}
 }
 
 func (m *cacheHitConfigModel) setWidth(w int) {
@@ -149,6 +169,11 @@ func (m cacheHitConfigModel) validate() (cacheHitConfigResult, error) {
 		return cacheHitConfigResult{}, fmt.Errorf("User Prompt is required")
 	}
 
+	apiMode := m.apiMode
+	if apiMode == "" {
+		apiMode = bench.ModeCompletion
+	}
+
 	return cacheHitConfigResult{
 		provider: bench.ProviderConfig{
 			Name:         "Provider",
@@ -158,6 +183,7 @@ func (m cacheHitConfigModel) validate() (cacheHitConfigResult, error) {
 			CustomParams: customParams,
 		},
 		cfg: bench.CacheHitConfig{
+			APIMode:         apiMode,
 			TestCount:       testCount,
 			MaxOutputTokens: maxOutputTokens,
 			SystemPrompt:    vals[6],
@@ -171,7 +197,11 @@ func (m cacheHitConfigModel) view(width, height int) string {
 	var sb strings.Builder
 	sb.WriteString(titleStyle.Render("Prompt Cache Hit Test"))
 	sb.WriteString("\n")
-	sb.WriteString(subtitleStyle.Render("Repeat one Chat Completions prompt every 3 seconds and read cached tokens from usage"))
+	subtitle := "Repeat one Chat Completions prompt every 3 seconds and read cached tokens from usage"
+	if m.apiMode == bench.ModeAnthropicMessages {
+		subtitle = "Repeat one Anthropic Messages prompt every 3 seconds and read cache_read / cache_creation tokens"
+	}
+	sb.WriteString(subtitleStyle.Render(subtitle))
 	sb.WriteString("\n\n")
 
 	renderSection := func(heading string, start, end int) {

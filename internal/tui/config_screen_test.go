@@ -131,14 +131,29 @@ func TestBuildFieldDefs_AnthropicMessages(t *testing.T) {
 	if !containsLabel(labels, "Concurrency") {
 		t.Error("anthropic should include Concurrency")
 	}
-	if containsLabel(labels, "Load Model") {
-		t.Error("anthropic should not include Load Model toggle")
+	if !containsLabel(labels, "Load Model") {
+		t.Error("anthropic should include Load Model toggle")
+	}
+	if !containsLabel(labels, "Request Logging") {
+		t.Error("anthropic single should include Request Logging toggle")
 	}
 	if containsLabel(labels, "Max In-Flight") {
-		t.Error("anthropic should not include Max In-Flight field")
+		t.Error("anthropic closed-loop should not include Max In-Flight field")
 	}
 	if containsLabel(labels, "Request Rate") {
-		t.Error("anthropic should not include Request Rate field")
+		t.Error("anthropic closed-loop should not include Request Rate field")
+	}
+
+	openDefs := buildFieldDefs(bench.ModeAnthropicMessages, "single", 1)
+	openLabels := fieldLabels(openDefs)
+	if !containsLabel(openLabels, "Max In-Flight") {
+		t.Error("anthropic open-loop should include Max In-Flight")
+	}
+	if !containsLabel(openLabels, "Request Rate") {
+		t.Error("anthropic open-loop should include Request Rate")
+	}
+	if containsLabel(openLabels, "Concurrency") {
+		t.Error("anthropic open-loop should not include Concurrency")
 	}
 }
 
@@ -496,8 +511,13 @@ func TestBuildFieldDefs_RequestLoggingToggleVisibility(t *testing.T) {
 	}
 
 	anthropic := buildFieldDefs(bench.ModeAnthropicMessages, "single", 0)
-	if containsLabel(fieldLabels(anthropic), "Request Logging") {
-		t.Error("anthropic mode should not include Request Logging toggle")
+	if !containsLabel(fieldLabels(anthropic), "Request Logging") {
+		t.Error("anthropic single-provider should include Request Logging toggle")
+	}
+
+	anthropicPK := buildFieldDefs(bench.ModeAnthropicMessages, "pk", 0)
+	if containsLabel(fieldLabels(anthropicPK), "Request Logging") {
+		t.Error("anthropic PK mode should not include Request Logging toggle")
 	}
 
 	embedding := buildFieldDefs(bench.ModeEmbedding, "single", 0)

@@ -17,11 +17,8 @@ func newTestModeSelect(apiMode string) testModeSelectModel {
 }
 
 func (m testModeSelectModel) maxCursor() int {
-	if m.apiMode == "completion" {
+	if m.apiMode == "completion" || m.apiMode == "anthropic_messages" {
 		return 4
-	}
-	if m.apiMode == "anthropic_messages" {
-		return 3
 	}
 	return 1
 }
@@ -44,7 +41,7 @@ func (m testModeSelectModel) update(msg tea.Msg) (testModeSelectModel, tea.Cmd) 
 }
 
 func (m testModeSelectModel) selected() string {
-	if m.apiMode == "completion" {
+	if m.apiMode == "completion" || m.apiMode == "anthropic_messages" {
 		switch m.cursor {
 		case 0:
 			return "single"
@@ -56,18 +53,6 @@ func (m testModeSelectModel) selected() string {
 			return "response_compare"
 		default:
 			return "cache_hit"
-		}
-	}
-	if m.apiMode == "anthropic_messages" {
-		switch m.cursor {
-		case 0:
-			return "single"
-		case 1:
-			return "single_response_view"
-		case 2:
-			return "pk"
-		default:
-			return "response_compare"
 		}
 	}
 	switch m.cursor {
@@ -96,20 +81,17 @@ func (m testModeSelectModel) view(width, height int) string {
 	sb.WriteString("\n\n")
 
 	var items []struct{ label, desc string }
-	if m.apiMode == "completion" {
-		items = []struct{ label, desc string }{
-			{"Single Provider", "Benchmark one provider's API"},
-			{"Single Response View", "Send a prompt to one provider and view the raw JSON response"},
-			{"PK Mode", "Compare two providers side by side"},
-			{"Response Compare", "Send a prompt to two providers and compare outputs"},
-			{"Prompt Cache Hit Test", "Repeat one prompt and report cached tokens from usage"},
+	if m.apiMode == "completion" || m.apiMode == "anthropic_messages" {
+		cacheDesc := "Repeat one prompt and report cached tokens from usage"
+		if m.apiMode == "anthropic_messages" {
+			cacheDesc = "Repeat one prompt and report cache_read / cache_creation tokens"
 		}
-	} else if m.apiMode == "anthropic_messages" {
 		items = []struct{ label, desc string }{
 			{"Single Provider", "Benchmark one provider's API"},
 			{"Single Response View", "Send a prompt to one provider and view the raw JSON response"},
 			{"PK Mode", "Compare two providers side by side"},
 			{"Response Compare", "Send a prompt to two providers and compare outputs"},
+			{"Prompt Cache Hit Test", cacheDesc},
 		}
 	} else {
 		items = []struct{ label, desc string }{

@@ -41,7 +41,7 @@ type BenchConfig struct {
 	RequestRate           int    // open-loop: requests per second (Poisson rate)
 	MaxInFlight           int    // open-loop: max concurrent in-flight requests
 	TTFTIncludesReasoning bool   // completion-like: first reasoning/thinking token stops the TTFT clock
-	RequestLogging        bool   // chat completion single-provider: log request/response to JSONL files
+	RequestLogging        bool   // completion-like single-provider: log request/response to JSONL files
 }
 
 // ProgressUpdate reports benchmark progress and optional per-request error details.

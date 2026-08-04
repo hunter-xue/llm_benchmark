@@ -383,6 +383,7 @@ func TestMarkdownCacheHitReport(t *testing.T) {
 	for _, want := range []string{
 		"# Prompt Cache Hit Report",
 		"## Test Parameters",
+		"| API Mode | completion |",
 		"| API Key | ***efgh |",
 		"| Custom Params | {\"prompt_cache_key\":\"benchmark\"} |",
 		"| Test Count | 3 |",
@@ -426,6 +427,56 @@ func TestMarkdownCacheHitReportAllFailed(t *testing.T) {
 	}
 	if !strings.Contains(md, "| 1 | error: boom | | | |") {
 		t.Error("per-request table must still be present")
+	}
+}
+
+func TestMarkdownCacheHitReportAnthropic(t *testing.T) {
+	provider := ProviderConfig{Name: "Provider", URL: "http://x/v1/messages", APIKey: "sk-ant-abcdefgh", Model: "claude"}
+	cfg := CacheHitConfig{APIMode: ModeAnthropicMessages, TestCount: 2, MaxOutputTokens: 1}
+	r := &CacheHitReport{
+		APIMode: ModeAnthropicMessages,
+		TotalRequests: 2, SuccessCount: 2, Valid: true,
+		TotalPromptTokens: 400, TotalCachedTokens: 1024, TotalCacheCreationTokens: 1024,
+		CacheHitRate: 41.83, AvgRequestHitRate: 41.83, AvgLatencyMs: 100,
+		Results: []CacheHitResult{
+			{Index: 1, Latency: 100 * time.Millisecond, PromptTokens: 200, CachedTokens: 0, CacheCreationTokens: 1024, HasCachedTokens: true, HasCacheCreation: true},
+			{Index: 2, Latency: 100 * time.Millisecond, PromptTokens: 200, CachedTokens: 1024, CacheCreationTokens: 0, HasCachedTokens: true, HasCacheCreation: true},
+		},
+	}
+	md := MarkdownCacheHitReport(provider, cfg, "prompt", r, time.Now())
+	for _, want := range []string{
+		"| API Mode | anthropic_messages |",
+		"| Input Tokens | 400 |",
+		"| Cache Read Tokens | 1024 |",
+		"| Cache Creation Tokens | 1024 |",
+		"| # | Latency | Input | Cache Read | Cache Creation | Hit Rate |",
+		"| 1 | 100.00 ms | 200 | 0 | 1024 | 0.00% |",
+		"| 2 | 100.00 ms | 200 | 1024 | 0 | 83.66%",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("anthropic cache hit report missing %q\n--- report ---\n%s", want, md)
+		}
+	}
+}
+
+func TestMarkdownBenchReport_AnthropicOpenLoopParams(t *testing.T) {
+	providers := []ProviderConfig{{Name: "A", URL: "http://a", Model: "m", APIKey: "sk-abcdefgh"}}
+	cfg := BenchConfig{
+		Mode: ModeAnthropicMessages, TotalRequests: 10, TargetTokens: 50,
+		LoadModel: LoadModelOpenLoop, RequestRate: 20, MaxInFlight: 5,
+		TTFTIncludesReasoning: true, RequestLogging: true,
+	}
+	r := &CompletionReport{TotalRequests: 10, SuccessCount: 10, Valid: true, WallTime: time.Second}
+	md := MarkdownBenchReport(ModeAnthropicMessages, "single", providers, cfg, nil, []*CompletionReport{r}, time.Now())
+	for _, want := range []string{
+		"| Load Model | open_loop |",
+		"| Request Rate | 20 req/s |",
+		"| Max In-Flight | 5 |",
+		"| Request Logging | true |",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("anthropic open-loop report missing %q\n--- report ---\n%s", want, md)
+		}
 	}
 }
 

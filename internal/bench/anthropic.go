@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	tiktoken "github.com/pkoukk/tiktoken-go"
@@ -63,6 +64,22 @@ func RunAnthropicMessagesBench(
 	tkm *tiktoken.Tiktoken,
 	onProgress func(ProgressUpdate),
 ) CompletionReport {
+	var logger *RequestLogger
+	runID := time.Now().Format("20060102-150405")
+	if cfg.RequestLogging {
+		l, err := NewRequestLogger(requestLogDir, runID)
+		if err != nil {
+			return CompletionReport{
+				TotalRequests:   cfg.TotalRequests,
+				ErrorDetails:    map[string]int{fmt.Sprintf("failed to initialize request logging: %v", err): 1},
+				ErrorCategories: map[string]int{ErrorCategoryClient: 1},
+				Valid:           false,
+			}
+		}
+		logger = l
+	}
+	var reqSeq atomic.Int64
+
 	results := make(chan completionResult, cfg.TotalRequests)
 
 	taskQueue := make(chan struct{}, cfg.TotalRequests)
@@ -106,7 +123,11 @@ func RunAnthropicMessagesBench(
 				default:
 				}
 
-				res := doAnthropicRequest(ctx, client, provider, cfg, testText, actualInputTokens, tkm)
+				reqID := ""
+				if logger != nil {
+					reqID = fmt.Sprintf("%s-%06d", runID, reqSeq.Add(1))
+				}
+				res := doAnthropicRequest(ctx, client, provider, cfg, testText, actualInputTokens, tkm, reqID, logger)
 				results <- res
 				mu.Lock()
 				if res.Err != nil {
@@ -131,6 +152,10 @@ func RunAnthropicMessagesBench(
 	wg.Wait()
 	close(results)
 	wallTime := time.Since(startTime)
+
+	if logger != nil {
+		logger.Close()
+	}
 
 	var (
 		ttfts              []float64
@@ -220,6 +245,14 @@ func RunAnthropicMessagesBench(
 			report.TPOTp99 = percentile(tpots, 0.99)
 		}
 	}
+	if logger != nil {
+		report.LogRequestsFile = logger.RequestsFile()
+		report.LogResponsesFile = logger.ResponsesFile()
+		report.LogDroppedCount = int(logger.DroppedCount())
+		if err := logger.Err(); err != nil {
+			report.LogError = err.Error()
+		}
+	}
 	return report
 }
 
@@ -231,6 +264,8 @@ func doAnthropicRequest(
 	testText string,
 	actualInputTokens int,
 	tkm *tiktoken.Tiktoken,
+	reqID string,
+	logger *RequestLogger,
 ) completionResult {
 	res := completionResult{InputTokens: actualInputTokens}
 
@@ -262,7 +297,25 @@ func doAnthropicRequest(
 	req.Header.Set("Accept", "text/event-stream")
 	setAnthropicHeaders(req, provider.APIKey)
 
+	// LogRequest runs before sendTime so logging can never inflate TTFT/E2E.
+	if logger != nil {
+		logger.LogRequest(reqID, req.Method, provider.URL, req.Header, body)
+	}
+
 	sendTime := time.Now()
+
+	var (
+		respStatus  string
+		respHeaders http.Header
+		respChunks  []string
+		errBodyText string
+	)
+	if logger != nil {
+		defer func() {
+			logger.LogResponse(reqID, respStatus, respHeaders, respChunks, errBodyText, res.Err, time.Since(sendTime))
+		}()
+	}
+
 	resp, err := client.Do(req)
 	if err != nil {
 		res.Err = err
@@ -270,10 +323,14 @@ func doAnthropicRequest(
 	}
 	defer resp.Body.Close()
 
+	respStatus = resp.Status
+	respHeaders = resp.Header
+
 	if resp.StatusCode != http.StatusOK {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		if len(errBody) > 0 {
-			res.Err = fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(errBody)))
+		errBodyText = strings.TrimSpace(string(errBody))
+		if len(errBodyText) > 0 {
+			res.Err = fmt.Errorf("HTTP %d: %s", resp.StatusCode, errBodyText)
 		} else {
 			res.Err = fmt.Errorf("HTTP %d", resp.StatusCode)
 		}
@@ -296,6 +353,9 @@ func doAnthropicRequest(
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		if logger != nil && line != "" {
+			respChunks = append(respChunks, line)
+		}
 		if strings.HasPrefix(line, "event:") {
 			eventType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
 			if eventType == "message_stop" {

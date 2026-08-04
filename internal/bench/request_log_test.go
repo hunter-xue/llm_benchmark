@@ -55,6 +55,19 @@ func TestFlattenHeaders_RedactsAuthorization(t *testing.T) {
 	}
 }
 
+func TestFlattenHeaders_RedactsXAPIKey(t *testing.T) {
+	h := http.Header{}
+	h.Set("x-api-key", "sk-ant-abcdefgh")
+	flat := flattenHeaders(h)
+	// http.Header.Set canonicalizes the key to X-Api-Key.
+	if flat["X-Api-Key"] != "***efgh" {
+		t.Errorf("X-Api-Key = %q, want ***efgh", flat["X-Api-Key"])
+	}
+	if h.Get("x-api-key") != "sk-ant-abcdefgh" {
+		t.Error("flattenHeaders must not mutate the source header map")
+	}
+}
+
 func TestRequestLogger_EnqueueDropsWhenFull(t *testing.T) {
 	l := &RequestLogger{ch: make(chan logEntry, 1)}
 	l.enqueue(logEntry{req: &requestLogEntry{RequestID: "a"}})
