@@ -81,7 +81,7 @@ ModeSelect -> TestModeSelect -> ConfigScreen -> RunningScreen -> ResultsScreen
 ### Key Design Decisions
 
 - **Token counting**: Uses `tiktoken-go` with the embedded `cl100k_base` encoding (offline only — `offlineOnlyBpeLoader` blocks network downloads). `--bpe-file` optionally overrides the embedded BPE file.
-- **Benchmark input generation**: Main benchmark modes generate exact-length prompts from the embedded natural sentence pool. `GenerateMeaningfulTextByTokens` strictly matches `TargetTokens`; `GenerateTextByTokens` remains as a fallback.
+- **Benchmark input generation**: Main benchmark modes generate exact-length prompts from the embedded natural sentence pool. `GenerateMeaningfulTextByTokens` strictly matches `TargetTokens`; `GenerateTextByTokens` remains as a fallback. Single-provider config has an **Input Mode** toggle (default **Same**): Same reuses one pre-generated prompt for every request; **Unique** pre-generates one prompt per request index via `GenerateMeaningfulTextByTokensVariant` (same token length, rotated sentence-pool start so prefixes differ — reduces shared prefix-cache hits, does not guarantee a cache miss). Texts are prepared before the timed run. PK mode always uses Same for a fair comparison.
 - **API usage reporting**: Completion reports keep local tiktoken-based performance counters and separately aggregate API-returned raw token usage fields (`APIPromptTokens`, `APICompletionTokens`, `APITotalTokens`, `APIUsageCount`, `MissingAPIUsageCount`). OpenAI-compatible streaming requests default to `stream_options.include_usage=true`; Custom Params can override it. Missing usage is shown as `N/A`, never counted as zero.
 - **Concurrency model**: Two modes via Load Model toggle (Chat Completion and Anthropic Messages): closed-loop (default) or open-loop (Poisson arrival + Max In-Flight semaphore + QueueTime).
 - **Progress reporting**: Benchmark goroutines call `prog.Send(ProgressMsg{...})` where `prog` is a package-level `*tea.Program` set before `p.Run()`.
@@ -91,7 +91,7 @@ ModeSelect -> TestModeSelect -> ConfigScreen -> RunningScreen -> ResultsScreen
 
 ```go
 type ProviderConfig struct { Name, URL, APIKey, Model string }
-type BenchConfig struct { Mode, Concurrency, TotalRequests, TargetTokens, MaxOutputTokens int; SystemPrompt string }
+type BenchConfig struct { Mode, Concurrency, TotalRequests, TargetTokens, MaxOutputTokens int; SystemPrompt string; UniqueInputs bool /* single only */ }
 type EmbeddingReport struct { ...; ErrorDetails, ErrorCategories map[string]int; Valid bool }
 type CompletionReport struct { ...; APIPromptTokens, APICompletionTokens, APITotalTokens, APIUsageCount, MissingAPIUsageCount int; ErrorDetails, ErrorCategories map[string]int; Valid bool }
 ```

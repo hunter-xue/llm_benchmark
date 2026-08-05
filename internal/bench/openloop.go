@@ -38,7 +38,7 @@ func RunOpenLoopCompletionBench(
 	ctx context.Context,
 	provider ProviderConfig,
 	cfg BenchConfig,
-	testText string,
+	testTexts []string,
 	actualInputTokens int,
 	tkm *tiktoken.Tiktoken,
 	onProgress func(ProgressUpdate),
@@ -124,15 +124,16 @@ func RunOpenLoopCompletionBench(
 		}
 
 		wg.Add(1)
-		go func(qt time.Duration, id string) {
+		go func(qt time.Duration, id string, idx int) {
 			defer wg.Done()
 			defer func() { <-semaphore }() // release slot
 
+			text := benchInput(testTexts, idx)
 			var res completionResult
 			if cfg.Mode == ModeAnthropicMessages {
-				res = doAnthropicRequest(ctx, client, provider, cfg, testText, actualInputTokens, tkm, id, logger)
+				res = doAnthropicRequest(ctx, client, provider, cfg, text, actualInputTokens, tkm, id, logger)
 			} else {
-				res = doCompletionRequest(ctx, client, provider, cfg, testText, actualInputTokens, tkm, id, logger)
+				res = doCompletionRequest(ctx, client, provider, cfg, text, actualInputTokens, tkm, id, logger)
 			}
 			res.QueueTime = qt
 			results <- res
@@ -153,7 +154,7 @@ func RunOpenLoopCompletionBench(
 				}
 				onProgress(update)
 			}
-		}(queueTime, reqID)
+		}(queueTime, reqID, i)
 	}
 
 waitForInFlight:

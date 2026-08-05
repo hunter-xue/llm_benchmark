@@ -46,7 +46,7 @@ func TestRunOpenLoopCompletionBench_Basic(t *testing.T) {
 	}
 
 	report := RunOpenLoopCompletionBench(
-		context.Background(), provider, cfg, "test prompt", 2, tkm, nil,
+		context.Background(), provider, cfg, []string{"test prompt"}, 2, tkm, nil,
 	)
 
 	if report.TotalRequests != 5 {
@@ -100,7 +100,7 @@ func TestRunOpenLoopCompletionBench_RespectsSemaphore(t *testing.T) {
 	}
 
 	report := RunOpenLoopCompletionBench(
-		context.Background(), provider, cfg, "test", 1, tkm, nil,
+		context.Background(), provider, cfg, []string{"test"}, 1, tkm, nil,
 	)
 
 	if report.SuccessCount != 6 {
@@ -136,7 +136,7 @@ func TestRunOpenLoopCompletionBench_Cancellation(t *testing.T) {
 	}()
 
 	start := time.Now()
-	report := RunOpenLoopCompletionBench(ctx, provider, cfg, "test", 1, tkm, nil)
+	report := RunOpenLoopCompletionBench(ctx, provider, cfg, []string{"test"}, 1, tkm, nil)
 	elapsed := time.Since(start)
 
 	// Cancellation stops the generator: far fewer than 100 requests are sent,
@@ -166,7 +166,7 @@ func TestRunOpenLoopCompletionBench_ZeroTotalRequests(t *testing.T) {
 	}
 
 	report := RunOpenLoopCompletionBench(
-		context.Background(), provider, cfg, "test", 1, tkm, nil,
+		context.Background(), provider, cfg, []string{"test"}, 1, tkm, nil,
 	)
 
 	if report.TotalRequests != 0 {
@@ -223,7 +223,7 @@ func TestRunOpenLoopCompletionBench_QueueTimeNonNegative(t *testing.T) {
 	}
 
 	report := RunOpenLoopCompletionBench(
-		context.Background(), provider, cfg, "test", 1, tkm, nil,
+		context.Background(), provider, cfg, []string{"test"}, 1, tkm, nil,
 	)
 
 	if report.SuccessCount != 5 {
@@ -269,7 +269,7 @@ func TestRunOpenLoopCompletionBench_Anthropic(t *testing.T) {
 	}
 
 	report := RunOpenLoopCompletionBench(
-		context.Background(), provider, cfg, "test", 1, tkm, nil,
+		context.Background(), provider, cfg, []string{"test"}, 1, tkm, nil,
 	)
 	if report.SuccessCount != 3 {
 		t.Fatalf("expected 3 successful requests, got %d (errors: %v)", report.SuccessCount, report.ErrorDetails)

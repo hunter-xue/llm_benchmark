@@ -30,14 +30,14 @@ func RunEmbeddingBench(
 	ctx context.Context,
 	provider ProviderConfig,
 	cfg BenchConfig,
-	testText string,
+	testTexts []string,
 	actualInputTokens int,
 	onProgress func(ProgressUpdate),
 ) EmbeddingReport {
 	results := make(chan embeddingResult, cfg.TotalRequests)
-	taskQueue := make(chan struct{}, cfg.TotalRequests)
+	taskQueue := make(chan int, cfg.TotalRequests)
 	for i := 0; i < cfg.TotalRequests; i++ {
-		taskQueue <- struct{}{}
+		taskQueue <- i
 	}
 	close(taskQueue)
 
@@ -55,8 +55,8 @@ func RunEmbeddingBench(
 			defer wg.Done()
 			client := &http.Client{Timeout: 120 * time.Second}
 
-			for range taskQueue {
-				res := doEmbeddingRequest(ctx, client, provider, testText, actualInputTokens)
+			for idx := range taskQueue {
+				res := doEmbeddingRequest(ctx, client, provider, benchInput(testTexts, idx), actualInputTokens)
 				results <- res
 				if res.Err != nil {
 					atomic.AddInt64(&errAtomic, 1)

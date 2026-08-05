@@ -527,7 +527,7 @@ func TestRunCompletionBench_LogsEndToEnd(t *testing.T) {
 		TTFTIncludesReasoning: true,
 		RequestLogging:        true,
 	}
-	report := RunCompletionBench(context.Background(), provider, cfg, "test prompt", 2, tkm, nil)
+	report := RunCompletionBench(context.Background(), provider, cfg, []string{"test prompt"}, 2, tkm, nil)
 	if !report.Valid {
 		t.Fatalf("report invalid; errors: %v", report.ErrorDetails)
 	}
@@ -600,7 +600,7 @@ func TestRunCompletionBench_LoggingDisabledByDefault(t *testing.T) {
 	tkm := testTokenizer(t)
 	provider := ProviderConfig{URL: server.URL, Model: "test-model"}
 	cfg := BenchConfig{Mode: ModeCompletion, Concurrency: 1, TotalRequests: 1, TTFTIncludesReasoning: true}
-	report := RunCompletionBench(context.Background(), provider, cfg, "test prompt", 2, tkm, nil)
+	report := RunCompletionBench(context.Background(), provider, cfg, []string{"test prompt"}, 2, tkm, nil)
 	if !report.Valid {
 		t.Fatalf("report invalid; errors: %v", report.ErrorDetails)
 	}
@@ -636,7 +636,7 @@ func TestRunOpenLoopCompletionBench_LogsEndToEnd(t *testing.T) {
 		TTFTIncludesReasoning: true,
 		RequestLogging:        true,
 	}
-	report := RunOpenLoopCompletionBench(context.Background(), provider, cfg, "test prompt", 2, tkm, nil)
+	report := RunOpenLoopCompletionBench(context.Background(), provider, cfg, []string{"test prompt"}, 2, tkm, nil)
 	if !report.Valid {
 		t.Fatalf("report invalid; errors: %v", report.ErrorDetails)
 	}
@@ -729,7 +729,7 @@ func TestRunCompletionBench_LoggingWithCancellation(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 		cancel()
 	}()
-	report := RunCompletionBench(ctx, provider, cfg, "test prompt", 2, tkm, nil)
+	report := RunCompletionBench(ctx, provider, cfg, []string{"test prompt"}, 2, tkm, nil)
 
 	// Must not hang, must close the logger cleanly, and every logged request
 	// must have exactly one logged response (1:1 correlation even on cancel).
@@ -793,7 +793,7 @@ func TestRunOpenLoopCompletionBench_LoggingWithCancellation(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 		cancel()
 	}()
-	report := RunOpenLoopCompletionBench(ctx, provider, cfg, "test prompt", 2, tkm, nil)
+	report := RunOpenLoopCompletionBench(ctx, provider, cfg, []string{"test prompt"}, 2, tkm, nil)
 
 	// Must not hang, must close the logger cleanly, and every logged request
 	// must have exactly one logged response (1:1 correlation even on cancel).

@@ -69,7 +69,7 @@ func startBench(
 ) (tea.Cmd, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	testText, actualTokens, err := prepareBenchText(cfg, tkm)
+	testTexts, actualTokens, err := prepareBenchText(cfg, tkm)
 	if err != nil {
 		// If we can't prepare text, immediately return done with error
 		cancel()
@@ -105,16 +105,16 @@ func startBench(
 			}
 
 			if cfg.Mode == bench.ModeEmbedding {
-				r := bench.RunEmbeddingBench(ctx, pv, cfg, testText, actualTokens, onProgress)
+				r := bench.RunEmbeddingBench(ctx, pv, cfg, testTexts, actualTokens, onProgress)
 				p.Send(BenchDoneMsg{ProviderIndex: idx, EmbeddingReport: &r})
 			} else if cfg.LoadModel == bench.LoadModelOpenLoop {
-				r := bench.RunOpenLoopCompletionBench(ctx, pv, cfg, testText, actualTokens, tkm, onProgress)
+				r := bench.RunOpenLoopCompletionBench(ctx, pv, cfg, testTexts, actualTokens, tkm, onProgress)
 				p.Send(BenchDoneMsg{ProviderIndex: idx, CompletionReport: &r})
 			} else if cfg.Mode == bench.ModeAnthropicMessages {
-				r := bench.RunAnthropicMessagesBench(ctx, pv, cfg, testText, actualTokens, tkm, onProgress)
+				r := bench.RunAnthropicMessagesBench(ctx, pv, cfg, testTexts, actualTokens, tkm, onProgress)
 				p.Send(BenchDoneMsg{ProviderIndex: idx, CompletionReport: &r})
 			} else {
-				r := bench.RunCompletionBench(ctx, pv, cfg, testText, actualTokens, tkm, onProgress)
+				r := bench.RunCompletionBench(ctx, pv, cfg, testTexts, actualTokens, tkm, onProgress)
 				p.Send(BenchDoneMsg{ProviderIndex: idx, CompletionReport: &r})
 			}
 		}()
@@ -198,13 +198,31 @@ func startCacheHitTest(
 	return nil, cancel
 }
 
-func prepareBenchText(cfg bench.BenchConfig, tkm *tiktoken.Tiktoken) (string, int, error) {
-	text, err := bench.GenerateMeaningfulTextByTokens(tkm, cfg.TargetTokens)
-	if err != nil {
-		return "", 0, err
+func prepareBenchText(cfg bench.BenchConfig, tkm *tiktoken.Tiktoken) ([]string, int, error) {
+	n := 1
+	if cfg.UniqueInputs {
+		n = cfg.TotalRequests
+		if n <= 0 {
+			n = 1
+		}
 	}
-	actualTokens := len(tkm.EncodeOrdinary(text))
-	return text, actualTokens, nil
+	texts := make([]string, n)
+	var actualTokens int
+	for i := 0; i < n; i++ {
+		text, err := bench.GenerateMeaningfulTextByTokensVariant(tkm, cfg.TargetTokens, i)
+		if err != nil {
+			return nil, 0, err
+		}
+		got := len(tkm.EncodeOrdinary(text))
+		if got != cfg.TargetTokens {
+			return nil, 0, fmt.Errorf("generated text token count = %d, want %d (variant %d)", got, cfg.TargetTokens, i)
+		}
+		if i == 0 {
+			actualTokens = got
+		}
+		texts[i] = text
+	}
+	return texts, actualTokens, nil
 }
 
 func (m runningModel) update(msg tea.Msg) (runningModel, tea.Cmd) {

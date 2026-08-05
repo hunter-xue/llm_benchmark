@@ -76,7 +76,7 @@ func TestBuildFieldDefs_CompletionClosedLoop(t *testing.T) {
 	}
 	assertLabelOrder(t, defs, []string{
 		"API URL", "API Key", "Model", "Custom Params",
-		"Load Model", "Concurrency", "Total Requests", "Input Tokens",
+		"Load Model", "Concurrency", "Total Requests", "Input Tokens", "Input Mode",
 		"Max Output Tokens", "TTFT Includes Reasoning", "System Prompt",
 		"Request Logging",
 	})
@@ -100,7 +100,7 @@ func TestBuildFieldDefs_CompletionOpenLoop(t *testing.T) {
 	}
 	assertLabelOrder(t, defs, []string{
 		"API URL", "API Key", "Model", "Custom Params",
-		"Load Model", "Max In-Flight", "Request Rate", "Total Requests", "Input Tokens",
+		"Load Model", "Max In-Flight", "Request Rate", "Total Requests", "Input Tokens", "Input Mode",
 		"Max Output Tokens", "TTFT Includes Reasoning", "System Prompt",
 		"Request Logging",
 	})
@@ -122,6 +122,13 @@ func TestBuildFieldDefs_Embedding(t *testing.T) {
 	if containsLabel(labels, "Request Rate") {
 		t.Error("embedding should not include Request Rate field")
 	}
+	if !containsLabel(labels, "Input Mode") {
+		t.Error("embedding single should include Input Mode toggle")
+	}
+	assertLabelOrder(t, defs, []string{
+		"API URL", "API Key", "Model", "Custom Params",
+		"Concurrency", "Total Requests", "Input Tokens", "Input Mode",
+	})
 }
 
 func TestBuildFieldDefs_AnthropicMessages(t *testing.T) {
@@ -578,5 +585,98 @@ func TestToggleFocusedField_RequestLoggingDispatch(t *testing.T) {
 	}
 	if !m.ttftReasoningOn {
 		t.Error("Request Logging toggle should not affect ttftReasoningOn")
+	}
+}
+
+func TestBuildFieldDefs_InputModeToggleVisibility(t *testing.T) {
+	for _, mode := range []string{bench.ModeEmbedding, bench.ModeCompletion, bench.ModeAnthropicMessages} {
+		single := buildFieldDefs(mode, "single", 0)
+		found := false
+		for _, d := range single {
+			if d.label == "Input Mode" {
+				found = true
+				if d.fieldType != "toggle" {
+					t.Errorf("%s single: Input Mode should have fieldType \"toggle\"", mode)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s single-provider should include Input Mode toggle", mode)
+		}
+
+		pk := buildFieldDefs(mode, "pk", 0)
+		if containsLabel(fieldLabels(pk), "Input Mode") {
+			t.Errorf("%s PK mode should not include Input Mode toggle", mode)
+		}
+	}
+}
+
+func TestValidate_InputMode(t *testing.T) {
+	m := newConfigModel(bench.ModeCompletion, "single")
+	if m.inputModeUnique {
+		t.Error("expected inputModeUnique default false (Same)")
+	}
+
+	setInputsByLabel(&m, map[string]string{
+		"API URL":        "https://api.openai.com/v1/chat/completions",
+		"Model":          "gpt-4o-mini",
+		"Concurrency":    "10",
+		"Total Requests": "10",
+		"Input Tokens":   "100",
+	})
+
+	_, cfg, err := m.validate()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.UniqueInputs {
+		t.Error("expected cfg.UniqueInputs=false by default")
+	}
+
+	m.inputModeUnique = true
+	_, cfg, err = m.validate()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.UniqueInputs {
+		t.Error("expected cfg.UniqueInputs=true after toggle to Unique")
+	}
+
+	pk := newConfigModel(bench.ModeCompletion, "pk")
+	pk.inputModeUnique = true // UI state must not leak into PK validation
+	setInputsByLabel(&pk, map[string]string{
+		"Provider A Name":  "A",
+		"Provider A URL":   "https://api.openai.com/v1/chat/completions",
+		"Provider A Model": "gpt-4o-mini",
+		"Provider B Name":  "B",
+		"Provider B URL":   "https://api.openai.com/v1/chat/completions",
+		"Provider B Model": "gpt-4o-mini",
+		"Concurrency":      "5",
+		"Total Requests":   "10",
+		"Input Tokens":     "100",
+	})
+	_, pkCfg, err := pk.validate()
+	if err != nil {
+		t.Fatalf("pk validate: %v", err)
+	}
+	if pkCfg.UniqueInputs {
+		t.Error("PK mode must force UniqueInputs=false")
+	}
+}
+
+func TestToggleFocusedField_InputModeDispatch(t *testing.T) {
+	m := newConfigModel(bench.ModeEmbedding, "single")
+	for i, fd := range m.fieldDefs {
+		if fd.label == "Input Mode" {
+			m.focusIndex = i
+			break
+		}
+	}
+	if m.fieldDefs[m.focusIndex].label != "Input Mode" {
+		t.Fatal("Input Mode field not found")
+	}
+	m.toggleFocusedField()
+	if !m.inputModeUnique {
+		t.Error("expected inputModeUnique=true after toggle")
 	}
 }

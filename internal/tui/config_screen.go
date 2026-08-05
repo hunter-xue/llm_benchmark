@@ -30,6 +30,7 @@ type configModel struct {
 	loadModelIndex   int  // 0 = closed-loop, 1 = open-loop (completion-like modes)
 	ttftReasoningOn  bool // TTFT Includes Reasoning toggle (completion-like modes)
 	requestLoggingOn bool // Request Logging toggle (completion-like single-provider only)
+	inputModeUnique  bool // Input Mode toggle (single-provider only); false = Same
 }
 
 func newConfigModel(apiMode, testMode string) configModel {
@@ -109,6 +110,12 @@ func buildFieldDefs(apiMode, testMode string, loadModelIndex int) []fieldDef {
 	// Request Logging toggle field (completion-like single-provider only)
 	requestLoggingField := fieldDef{
 		label:     "Request Logging",
+		fieldType: "toggle",
+	}
+
+	// Input Mode toggle (single-provider only)
+	inputModeField := fieldDef{
+		label:     "Input Mode",
 		fieldType: "toggle",
 	}
 
@@ -202,6 +209,7 @@ func buildFieldDefs(apiMode, testMode string, loadModelIndex int) []fieldDef {
 	defs = append(defs,
 		fieldDef{label: "Total Requests", placeholder: "e.g. 100"},
 		fieldDef{label: "Input Tokens", placeholder: "e.g. 500"},
+		inputModeField,
 	)
 	if isCompletionLike {
 		defs = append(defs,
@@ -249,6 +257,8 @@ func (m *configModel) toggleFocusedField() {
 		m.ttftReasoningOn = !m.ttftReasoningOn
 	case "Request Logging":
 		m.requestLoggingOn = !m.requestLoggingOn
+	case "Input Mode":
+		m.inputModeUnique = !m.inputModeUnique
 	default:
 		panic(fmt.Sprintf("no toggle handler for field %q", m.fieldDefs[m.focusIndex].label))
 	}
@@ -405,6 +415,8 @@ func (m configModel) validate() ([]bench.ProviderConfig, bench.BenchConfig, erro
 			cfg.SystemPrompt = vals[fieldIdx("System Prompt")]
 			cfg.TTFTIncludesReasoning = m.ttftReasoningOn
 		}
+		// PK always shares one prompt for a fair comparison.
+		cfg.UniqueInputs = false
 		providers := []bench.ProviderConfig{
 			{Name: vals[fieldIdx("Provider A Name")], URL: urlA, APIKey: vals[fieldIdx("Provider A API Key")], Model: vals[modelAIdx], CustomParams: vals[customAIdx]},
 			{Name: vals[fieldIdx("Provider B Name")], URL: urlB, APIKey: vals[fieldIdx("Provider B API Key")], Model: vals[modelBIdx], CustomParams: vals[customBIdx]},
@@ -467,6 +479,7 @@ func (m configModel) validate() ([]bench.ProviderConfig, bench.BenchConfig, erro
 		Concurrency:   c,
 		TotalRequests: n,
 		TargetTokens:  tokens,
+		UniqueInputs:  m.inputModeUnique,
 	}
 	if isOpenLoop {
 		cfg.LoadModel = bench.LoadModelOpenLoop
@@ -573,6 +586,11 @@ func (m configModel) renderToggle(label string) string {
 			return "( ) off  (●) on"
 		}
 		return "(●) off  ( ) on"
+	case "Input Mode":
+		if m.inputModeUnique {
+			return "( ) Same  (●) Unique"
+		}
+		return "(●) Same  ( ) Unique"
 	}
 	panic(fmt.Sprintf("no toggle renderer for field %q", label))
 }

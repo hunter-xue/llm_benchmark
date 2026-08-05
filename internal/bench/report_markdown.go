@@ -123,6 +123,13 @@ func mdSharedBenchParams(apiMode, testMode string, cfg BenchConfig) [][]string {
 		[]string{"Total Requests", fmt.Sprintf("%d", cfg.TotalRequests)},
 		[]string{"Input Tokens", fmt.Sprintf("%d", cfg.TargetTokens)},
 	)
+	if testMode == "single" {
+		inputMode := "same"
+		if cfg.UniqueInputs {
+			inputMode = "unique"
+		}
+		rows = append(rows, []string{"Input Mode", inputMode})
+	}
 	if isCompletionLike {
 		rows = append(rows, []string{"Max Output Tokens", mdMaxOutputTokens(cfg.MaxOutputTokens)})
 		rows = append(rows, []string{"TTFT Includes Reasoning", strconv.FormatBool(cfg.TTFTIncludesReasoning)})

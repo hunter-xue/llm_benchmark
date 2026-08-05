@@ -75,7 +75,7 @@ func TestGenerateMeaningfulTextByTokensDeterministicAndVaried(t *testing.T) {
 func TestBuildCyclicMeaningfulTextRepeatsCandidatesInOrder(t *testing.T) {
 	tkm := testTokenizer(t)
 
-	text, err := buildCyclicMeaningfulText(tkm, []string{"First sentence.", "Second sentence."}, 100)
+	text, err := buildCyclicMeaningfulText(tkm, []string{"First sentence.", "Second sentence."}, 100, 0)
 	if err != nil {
 		t.Fatalf("buildCyclicMeaningfulText: %v", err)
 	}
@@ -84,6 +84,56 @@ func TestBuildCyclicMeaningfulTextRepeatsCandidatesInOrder(t *testing.T) {
 	}
 	if !strings.HasPrefix(text, "First sentence.\nSecond sentence.\nFirst sentence.") {
 		t.Fatalf("text does not repeat candidates in order: %q", text)
+	}
+}
+
+func TestGenerateMeaningfulTextByTokensVariantDiffersAndExactCount(t *testing.T) {
+	tkm := testTokenizer(t)
+	const target = 100
+
+	base, err := GenerateMeaningfulTextByTokens(tkm, target)
+	if err != nil {
+		t.Fatalf("GenerateMeaningfulTextByTokens: %v", err)
+	}
+	v0, err := GenerateMeaningfulTextByTokensVariant(tkm, target, 0)
+	if err != nil {
+		t.Fatalf("GenerateMeaningfulTextByTokensVariant(0): %v", err)
+	}
+	if base != v0 {
+		t.Fatal("variant 0 should match GenerateMeaningfulTextByTokens")
+	}
+
+	v1, err := GenerateMeaningfulTextByTokensVariant(tkm, target, 1)
+	if err != nil {
+		t.Fatalf("GenerateMeaningfulTextByTokensVariant(1): %v", err)
+	}
+	if got := len(tkm.EncodeOrdinary(v1)); got != target {
+		t.Fatalf("variant 1 token count = %d, want %d", got, target)
+	}
+	if v0 == v1 {
+		t.Fatal("different variants should produce different text")
+	}
+	// Distinct prefixes matter for prefix-cache avoidance.
+	if prefixLen := 40; len(v0) >= prefixLen && len(v1) >= prefixLen && v0[:prefixLen] == v1[:prefixLen] {
+		t.Fatalf("expected different prefixes for variants; both start with %q", v0[:prefixLen])
+	}
+}
+
+func TestGenerateTextByTokensVariantDiffers(t *testing.T) {
+	tkm := testTokenizer(t)
+	a, err := GenerateTextByTokensVariant(tkm, 200, 1)
+	if err != nil {
+		t.Fatalf("variant 1: %v", err)
+	}
+	b, err := GenerateTextByTokensVariant(tkm, 200, 2)
+	if err != nil {
+		t.Fatalf("variant 2: %v", err)
+	}
+	if len(tkm.EncodeOrdinary(a)) != 200 || len(tkm.EncodeOrdinary(b)) != 200 {
+		t.Fatal("variant filler must keep exact token count")
+	}
+	if a == b {
+		t.Fatal("different filler variants should differ")
 	}
 }
 

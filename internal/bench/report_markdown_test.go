@@ -37,6 +37,7 @@ func TestMarkdownBenchReport_EmbeddingSingle(t *testing.T) {
 		"| Concurrency | 5 |",
 		"| Total Requests | 10 |",
 		"| Input Tokens | 100 |",
+		"| Input Mode | same |",
 		"## Results",
 		"| Metric | Value |",
 		"| Total Requests | 10 |",
@@ -124,12 +125,14 @@ func TestMarkdownBenchReport_CompletionSingle(t *testing.T) {
 		Mode: ModeCompletion, Concurrency: 10, TotalRequests: 100, TargetTokens: 1000,
 		MaxOutputTokens: 512, SystemPrompt: "You are helpful",
 		LoadModel: LoadModelClosedLoop, TTFTIncludesReasoning: true, RequestLogging: true,
+		UniqueInputs: true,
 	}
 	md := MarkdownBenchReport(ModeCompletion, "single", providers, cfg, nil, []*CompletionReport{fullCompletionReportForMD()}, time.Now())
 
 	for _, want := range []string{
 		"# Benchmark Report — Chat Completion",
 		"| Custom Params | {\"temperature\":0} |",
+		"| Input Mode | unique |",
 		"| Max Output Tokens | 512 |",
 		"| Load Model | closed_loop |",
 		"| TTFT Includes Reasoning | true |",
@@ -270,9 +273,12 @@ func TestMarkdownBenchReport_CompletionPK(t *testing.T) {
 			t.Errorf("PK report missing %q\n--- report ---\n%s", want, md)
 		}
 	}
-	// Request Logging toggle does not exist in PK mode
+	// Request Logging / Input Mode toggles do not exist in PK mode
 	if strings.Contains(md, "Request Logging") {
 		t.Error("PK report should not contain Request Logging row")
+	}
+	if strings.Contains(md, "Input Mode") {
+		t.Error("PK report should not contain Input Mode row")
 	}
 	// no queue time data → no queue rows
 	if strings.Contains(md, "Queue Time") {

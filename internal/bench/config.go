@@ -42,6 +42,16 @@ type BenchConfig struct {
 	MaxInFlight           int    // open-loop: max concurrent in-flight requests
 	TTFTIncludesReasoning bool   // completion-like: first reasoning/thinking token stops the TTFT clock
 	RequestLogging        bool   // completion-like single-provider: log request/response to JSONL files
+	UniqueInputs          bool   // single only; false = reuse one prompt (default), true = per-request unique prompts
+}
+
+// benchInput selects the prompt for request index i.
+// A single-element slice is reused for every request (Same mode).
+func benchInput(texts []string, i int) string {
+	if len(texts) == 1 {
+		return texts[0]
+	}
+	return texts[i]
 }
 
 // ProgressUpdate reports benchmark progress and optional per-request error details.

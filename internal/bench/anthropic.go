@@ -59,7 +59,7 @@ func RunAnthropicMessagesBench(
 	ctx context.Context,
 	provider ProviderConfig,
 	cfg BenchConfig,
-	testText string,
+	testTexts []string,
 	actualInputTokens int,
 	tkm *tiktoken.Tiktoken,
 	onProgress func(ProgressUpdate),
@@ -82,9 +82,9 @@ func RunAnthropicMessagesBench(
 
 	results := make(chan completionResult, cfg.TotalRequests)
 
-	taskQueue := make(chan struct{}, cfg.TotalRequests)
+	taskQueue := make(chan int, cfg.TotalRequests)
 	for i := 0; i < cfg.TotalRequests; i++ {
-		taskQueue <- struct{}{}
+		taskQueue <- i
 	}
 	close(taskQueue)
 
@@ -103,7 +103,7 @@ func RunAnthropicMessagesBench(
 			defer wg.Done()
 			client := &http.Client{Timeout: 300 * time.Second}
 
-			for range taskQueue {
+			for idx := range taskQueue {
 				select {
 				case <-ctx.Done():
 					results <- completionResult{Err: ctx.Err()}
@@ -127,7 +127,7 @@ func RunAnthropicMessagesBench(
 				if logger != nil {
 					reqID = fmt.Sprintf("%s-%06d", runID, reqSeq.Add(1))
 				}
-				res := doAnthropicRequest(ctx, client, provider, cfg, testText, actualInputTokens, tkm, reqID, logger)
+				res := doAnthropicRequest(ctx, client, provider, cfg, benchInput(testTexts, idx), actualInputTokens, tkm, reqID, logger)
 				results <- res
 				mu.Lock()
 				if res.Err != nil {
